@@ -35,6 +35,21 @@ def take_item(locker_id, taker_name):
     resp.raise_for_status()
     return resp.json()
 
+def recognize_face(image_bytes):
+    """Send one camera frame to the server and return the recognized name, if any."""
+    files = {"image": ("camera-frame.jpg", image_bytes, "image/jpeg")}
+    resp = requests.post(
+        f"{SERVER_URL}/api/face-recognize",
+        files=files,
+        timeout=60,
+        verify=False,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("recognized") and isinstance(data.get("name"), str):
+        return data["name"]
+    return None
+
 def get_photo_url(photo_name):
     """获取照片的完整URL"""
     return f"{SERVER_URL}/images/{photo_name}"
