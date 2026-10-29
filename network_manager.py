@@ -42,7 +42,7 @@ def recognize_face(image_bytes):
         f"{SERVER_URL}/api/face-recognize",
         files=files,
         timeout=60,
-        verify=False,
+        verify=config.SERVER_CERT_PATH or True,
     )
     resp.raise_for_status()
     data = resp.json()
