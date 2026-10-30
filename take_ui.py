@@ -27,7 +27,11 @@ class TakeUI:
             messagebox.showerror("错误", "刷卡验证暂未制作")
         elif auth == 1:
             fr = FaceRecognition()
-            self.taker_name = fr.run_recognition()
+            try:
+                self.taker_name = fr.run_recognition()
+            except requests.exceptions.RequestException:
+                messagebox.showerror("识别失败", "人脸识别服务器不可用，请检查服务器、人脸库和模型配置")
+                return
             if self.taker_name is not None:
                 self._show_locker_selection()
         elif auth == 2:

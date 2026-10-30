@@ -3,5 +3,3 @@ Pillow
 pyserial
 crcmod
 requests
-numpy
-insightface
