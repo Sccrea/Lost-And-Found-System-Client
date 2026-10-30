@@ -29,31 +29,32 @@ pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 | :--- | :--- | :--- | :--- |
 | **`TERMINAL_ID`** | String | `"0"` | **终端唯一标识符**。用于向服务端区分不同的失物招领终端设备（如设备序列号或自定义编号）。服务端会依据此 ID 记录物品是由哪个终端存入的，并在查询柜子状态时进行隔离。 |
 | **`LOCATION`** | String | `"1号楼1层"` | **终端位置描述**。用于在主界面顶部显示（如“当前位置：1号楼1层”），同时在上传终端信息时会发送给服务端，方便管理员在后台查看设备分布。 |
-| **`SERVER_URL`** | String | `"https://127.0.0.1:5000"` | **服务端接口地址**。客户端所有网络请求（存物、取物、查询状态等）都会基于此 URL 拼接路由（如 `/api/store`）。默认指向本机 HTTPS 端口，实际部署时需修改为服务端的真实 IP 和端口（例如 `https://192.168.1.100:5000`）。 |
-| **`SERVER_CERT_PATH`** | String | `""` | **服务器 HTTPS 证书路径**。自签名证书部署时，把服务器 `cert.pem` 复制到客户端 `files` 目录并设置为 `files/server-cert.pem`；人脸识别请求会使用此证书验证服务器。留空时使用系统受信任的证书。 |
-| **`AUTH_METHOD`** | Integer | `0` | **取物认证方式**。`1`启用人脸识别；当前刷卡认证尚未实现，`0`和`2`暂不可用。人脸模型和人脸库由服务端管理。|
+| **`SERVER_URL`** | String | `"https://127.0.0.1:5000"` | **服务端接口地址**。客户端所有网络请求（存物、取物、查询状态等）都会基于此 URL 拼接路由（如 `/api/store`）。默认指向本机 HTTPS 端口，实际部署时需修改为服务端的真实域名和端口（例如 `https://你的域名:5000`），且域名要与服务器证书匹配。 |
+| **`SERVER_CERT_PATH`** | String | `""` | **服务器 HTTPS 证书路径**。所有 HTTPS 请求都会校验证书：使用公网 CA（如 Let's Encrypt）时留空，走系统信任库；自签名证书部署时，把服务器 `cert.pem` 复制到客户端 `files` 目录并设置为 `files/server-cert.pem`。自签名但留空会导致连接失败，不会再跳过校验。 |
 | **`ENABLE_LOCK`** | Boolean | `true` | **电锁功能开关**。控制实际是否通过串口操作物理电锁。若设为 `false`，点击“存物”或“取物”时，程序会跳过串口开锁指令（仅打印日志），适合**无硬件环境的开发调试**或纯软件演示模式。 |
 
 ---
 
 **如果设备上没有连接锁硬件，请将`ENABLE_LOCK`值设为`false`以禁止发送指令到锁信息**
 
-### 服务端人脸识别
+### 取物人脸识别
 
-人脸摄像头连接在客户端终端上。客户端只采集并压缩摄像头画面，然后通过 `/api/face-recognize` 把画面发送到 `SERVER_URL`；服务器负责运行 InsightFace 模型并与服务器端的人脸库比对。客户端不再安装或运行人脸识别模型。
+人脸摄像头连接在客户端终端上。客户端只采集并压缩摄像头画面，然后通过 `/api/face-recognize` 把画面发送到 `SERVER_URL`；服务器负责运行 InsightFace 模型并与服务器端的人脸库比对。客户端不再安装或运行人脸识别模型，取物也只有人脸识别这一种验证方式。
 
-启用前请先按服务端仓库 README 配置服务器模型和私有人脸库，然后在 `./files/config.json` 中设置：
+使用前请先按服务端仓库 README 配置服务器模型和私有人脸库，然后在 `./files/config.json` 中设置：
 
 ```json
 {
-    "SERVER_URL": "https://服务器地址:5000",
-    "AUTH_METHOD": 1
+    "SERVER_URL": "https://你的域名:5000",
+    "SERVER_CERT_PATH": ""
 }
 ```
 
 `SERVER_URL` 要填写客户端能够访问的服务器地址。识别时，客户端摄像头画面会发送给该服务器；请只在你信任并已配置好的网络与服务器上使用。
 
-如果服务器使用自签名证书，请把对应的 `cert.pem` 复制为客户端 `files/server-cert.pem`，并在 `files/config.json` 设置 `"SERVER_CERT_PATH": "files/server-cert.pem"`。新的人脸识别请求会验证服务器证书；请确保证书对应的服务器地址与 `SERVER_URL` 匹配。
+如果服务器使用自签名证书，请把对应的 `cert.pem` 复制为客户端 `files/server-cert.pem`，并在 `files/config.json` 设置 `"SERVER_CERT_PATH": "files/server-cert.pem"`。所有 HTTPS 请求都会验证服务器证书；请确保证书对应的服务器地址与 `SERVER_URL` 匹配。
+
+如果服务器使用公网 CA 签发的证书（如 Let's Encrypt），`SERVER_CERT_PATH` 保持为空即可。不要把服务器返回的 `fullchain.pem` 填到这里——它是服务器证书链，不是 CA 证书包，会导致 `unable to get issuer certificate`。
 
 ## 构建可执行文件
 可用Pyinstaller编译:
@@ -95,7 +96,6 @@ pyinstaller --onefile main_app.py
 | `TERMINAL_ID` | 终端唯一标识，从 `config.json` 读取，默认为 `"0"`。 |
 | `LOCATION` | 终端位置描述，从 `config.json` 读取，默认为 `"1号楼1层"`。 |
 | `SERVER_URL` | 服务端基础 URL（例如 `https://127.0.0.1:5000`），从 `config.json` 读取。 |
-| `AUTH_METHOD` | 预留认证方式字段，当前未使用，默认为 `0`。 |
 | `ENABLE_LOCK` | 是否启用实际电锁控制（`True`/`False`），默认 `True`。 |
 
 #### 函数

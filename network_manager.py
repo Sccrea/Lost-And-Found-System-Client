@@ -3,8 +3,13 @@ import config
 
 SERVER_URL = config.SERVER_URL
 
+
+def request_verify():
+    """requests 的 verify 参数：有自定义证书就用它，否则使用系统信任库。"""
+    return config.SERVER_CERT_PATH or True
+
 def get_lockers_status():
-    resp = requests.get(f"{SERVER_URL}/api/lockers", params={'terminal_id': config.TERMINAL_ID}, timeout=5, verify=False)
+    resp = requests.get(f"{SERVER_URL}/api/lockers", params={'terminal_id': config.TERMINAL_ID}, timeout=5, verify=request_verify())
     resp.raise_for_status()
     data = resp.json()
     # 将 JSON 返回的字符串键转为整数键
@@ -19,7 +24,7 @@ def store_item(locker_id, photo_path):
             'terminal_id': config.TERMINAL_ID,
             'locker_id': locker_id
         }
-        resp = requests.post(url, data=data, files=files, timeout=10, verify=False)
+        resp = requests.post(url, data=data, files=files, timeout=10, verify=request_verify())
         resp.raise_for_status()
         return resp.json()
 
@@ -31,7 +36,7 @@ def take_item(locker_id, taker_name):
         'locker_id': locker_id,
         'taker_name': taker_name,
     }
-    resp = requests.post(url, json=payload, timeout=5, verify=False)
+    resp = requests.post(url, json=payload, timeout=5, verify=request_verify())
     resp.raise_for_status()
     return resp.json()
 
@@ -42,7 +47,7 @@ def recognize_face(image_bytes):
         f"{SERVER_URL}/api/face-recognize",
         files=files,
         timeout=60,
-        verify=config.SERVER_CERT_PATH or True,
+        verify=request_verify(),
     )
     resp.raise_for_status()
     data = resp.json()
@@ -60,6 +65,6 @@ def register_terminal():
         'terminal_id': config.TERMINAL_ID,
         'location': config.LOCATION
     }
-    resp = requests.post(url, json=payload, timeout=5, verify=False)
+    resp = requests.post(url, json=payload, timeout=5, verify=request_verify())
     resp.raise_for_status()
     return resp.json()
