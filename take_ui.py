@@ -21,23 +21,15 @@ class TakeUI:
         self.locker_buttons = []        # 用于高亮
 
     def show(self):
-        """第一步：获取取物人姓名"""
-        auth = config.AUTH_METHOD
-        if auth == 0:
-            messagebox.showerror("错误", "刷卡验证暂未制作")
-        elif auth == 1:
-            fr = FaceRecognition()
-            try:
-                self.taker_name = fr.run_recognition()
-            except requests.exceptions.RequestException:
-                messagebox.showerror("识别失败", "人脸识别服务器不可用，请检查服务器、人脸库和模型配置")
-                return
-            if self.taker_name is not None:
-                self._show_locker_selection()
-        elif auth == 2:
-            messagebox.showerror("错误", "刷卡验证暂未制作")
-        else:
-            messagebox.showerror("验证失败", "无效的验证方式")
+        """第一步：人脸识别取物人"""
+        fr = FaceRecognition()
+        try:
+            self.taker_name = fr.run_recognition()
+        except requests.exceptions.RequestException:
+            messagebox.showerror("识别失败", "人脸识别服务器不可用，请检查服务器、人脸库和模型配置")
+            return
+        if self.taker_name is not None:
+            self._show_locker_selection()
 
     def _show_locker_selection(self):
         """第二步：显示柜子选择界面"""
@@ -149,7 +141,7 @@ class TakeUI:
     def _download_photo(self, photo_name):
         url = network_manager.get_photo_url(photo_name)
         try:
-            resp = requests.get(url, timeout=10, verify=False)
+            resp = requests.get(url, timeout=10, verify=network_manager.request_verify())
             resp.raise_for_status()
             temp_path = os.path.join(config.TEMP_DIR, photo_name)
             with open(temp_path, 'wb') as f:
