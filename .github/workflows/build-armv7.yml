@@ -24,7 +24,7 @@ jobs:
         run: |
           docker run --rm --platform linux/arm/v7 \
             -v "$PWD:/src" -w /src \
-            arm32v7/debian:bullseye \
+            arm32v7/debian:bookworm \
             bash -euxo pipefail -c '
               apt-get update
               DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -34,7 +34,7 @@ jobs:
               . /venv/bin/activate
               pip install --upgrade pip
               pip install --extra-index-url https://www.piwheels.org/simple \
-                "numpy==1.26.4" "opencv-python==4.6.0.66" "Pillow==9.5.0" \
+                "numpy==2.2.6" "opencv-python==5.0.0.93" "Pillow==9.5.0" \
                 "pyserial==3.5" "crcmod==1.7" "requests==2.32.3" "pyinstaller==6.11.1"
               pyinstaller --noconfirm --clean --onefile --name LostAndFoundClient-armv7 main_app.py
               ls -l dist
