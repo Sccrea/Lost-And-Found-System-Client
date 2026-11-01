@@ -1,0 +1,61 @@
+name: Build ARMv7 client
+
+on:
+  push:
+    branches:
+      - ci/armv7-build
+    paths:
+      - ".github/workflows/build-armv7.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - name: Build inside armv7 Debian
+        run: |
+          docker run --rm --platform linux/arm/v7 \
+            -v "$PWD:/src" -w /src \
+            arm32v7/debian:bullseye \
+            bash -euxo pipefail -c '
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                python3 python3-venv python3-tk python3-dev build-essential zlib1g-dev \
+                libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libxcb1 ca-certificates
+              python3 -m venv /venv
+              . /venv/bin/activate
+              pip install --upgrade pip
+              pip install --extra-index-url https://www.piwheels.org/simple \
+                "numpy==1.26.4" "opencv-python==4.6.0.66" "Pillow==9.5.0" \
+                "pyserial==3.5" "crcmod==1.7" "requests==2.32.3" "pyinstaller==6.11.1"
+              pyinstaller --noconfirm --clean --onefile --name LostAndFoundClient-armv7 main_app.py
+              ls -l dist
+            '
+
+      - name: Show binary info
+        run: |
+          file dist/LostAndFoundClient-armv7
+          ls -lh dist/LostAndFoundClient-armv7
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LostAndFoundClient-armv7
+          path: dist/LostAndFoundClient-armv7
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: armv7-client-build
+          name: ARMv7 client build
+          prerelease: true
+          body: |
+            Automated ARMv7 (32-bit) build of the lost-and-found client.
+            Commit: ${{ github.sha }}
+          files: dist/LostAndFoundClient-armv7
