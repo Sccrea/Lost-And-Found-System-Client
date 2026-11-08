@@ -222,3 +222,10 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 face_db*.json
+
+# Item recognition model (10MB+, not committed; see README "item recognition")
+models/*.onnx
+models/*.pt
+
+# Runtime data
+files/

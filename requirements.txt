@@ -3,3 +3,6 @@ Pillow
 pyserial
 crcmod
 requests
+# 物品识别（YOLO11 ONNX 推理）
+numpy
+onnxruntime

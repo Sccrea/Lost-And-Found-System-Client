@@ -22,7 +22,12 @@ DEFAULT_CONFIG = {
     "LOCATION": "1号楼1层",
     "SERVER_URL": "https://127.0.0.1:5000",
     "SERVER_CERT_PATH": "",
-    "ENABLE_LOCK": True
+    "ENABLE_LOCK": True,
+    # ---- 物品识别（新增）----
+    "ENABLE_RECOGNITION": True,   # 关闭后拍照不做识别，只保留拍照流程
+    "CAMERA_INDEX": 0,            # 摄像头序号，多摄像头时改这里
+    "SCORE_THRESHOLD": 0.5,       # 置信度阈值
+    "CAMERA_TEST_IMAGE": ""       # 无摄像头联调用：填图片路径，拍照时直接用该图
 }
 
 def ensure_config():
@@ -55,3 +60,9 @@ SERVER_CERT_PATH = _config.get("SERVER_CERT_PATH", DEFAULT_CONFIG["SERVER_CERT_P
 if SERVER_CERT_PATH and not os.path.isabs(SERVER_CERT_PATH):
     SERVER_CERT_PATH = os.path.join(BASE_DIR, SERVER_CERT_PATH)
 ENABLE_LOCK = _config.get("ENABLE_LOCK", DEFAULT_CONFIG["ENABLE_LOCK"])
+ENABLE_RECOGNITION = bool(_config.get("ENABLE_RECOGNITION", True))
+CAMERA_INDEX = int(_config.get("CAMERA_INDEX", 0))
+SCORE_THRESHOLD = float(_config.get("SCORE_THRESHOLD", 0.5))
+CAMERA_TEST_IMAGE = _config.get("CAMERA_TEST_IMAGE", "") or ""
+if CAMERA_TEST_IMAGE and not os.path.isabs(CAMERA_TEST_IMAGE):
+    CAMERA_TEST_IMAGE = os.path.join(BASE_DIR, CAMERA_TEST_IMAGE)

@@ -56,6 +56,31 @@ pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 如果服务器使用公网 CA 签发的证书（如 Let's Encrypt），`SERVER_CERT_PATH` 保持为空即可。不要把服务器返回的 `fullchain.pem` 填到这里——它是服务器证书链，不是 CA 证书包，会导致 `unable to get issuer certificate`。
 
+## 物品识别（拍照自动识别失物类别）
+
+存物时，客户端会**在拍照画面上实时框出识别到的物品**，按下空格后自动带上识别结果，
+存物界面显示「已识别：行李箱（置信度 90%）」，并允许在下拉框中手动更正——识别只作辅助，最终以用户选择为准。
+
+- 模型：YOLO11n（ONNX），CPU 推理，单帧约 60~100 ms，无需 GPU、无需联网。
+- 支持类别（COCO 子集）：背包、手提包、行李箱、瓶子、杯子、手机、书本；其余物品归为「其他」。
+- 识别结果随 `/api/store` 一起提交，字段为 `item_category`、`item_confidence`。
+  旧版服务端会忽略这两个附加字段（不影响存物），新版服务端可落库后在管理端展示。
+
+模型文件不入库（约 10 MB），发布版 exe 已内置；源码运行需要把 `yolo11n.onnx` 放到
+`models/` 目录（或设置环境变量 `LOSTFOUND_MODEL_PATH` 指向模型）。exe 同级放一份
+`models/yolo11n.onnx` 会优先生效，方便现场换模型而不用重新打包。
+
+`files/config.json` 中与识别相关的配置：
+
+| 字段 | 默认值 | 说明 |
+| :--- | :--- | :--- |
+| `ENABLE_RECOGNITION` | `true` | 关闭后只拍照不识别，界面提示手动选择类别 |
+| `CAMERA_INDEX` | `0` | 摄像头序号，多摄像头时调整 |
+| `SCORE_THRESHOLD` | `0.5` | 置信度阈值，调低更容易识别、误判也更多 |
+| `CAMERA_TEST_IMAGE` | `""` | 无摄像头联调用：填图片路径则拍照时直接用该图 |
+
+> 没有摄像头时，把 `CAMERA_TEST_IMAGE` 指向一张图片即可完整走通「拍照 → 识别 → 存物」流程，便于部署前自检。
+
 ## 构建可执行文件
 可用Pyinstaller编译:
 ```bash
@@ -64,6 +89,13 @@ pip install pyinstaller
 
 ```bash
 pyinstaller --onefile main_app.py
+```
+
+带物品识别的打包命令（模型内置进 exe，单文件免安装）：
+
+```bash
+pyinstaller --onefile --windowed --name LostAndFoundClient-ItemRecognition ^
+  --add-data "models/yolo11n.onnx;models" main_app.py
 ```
 ## 函数意义解释
 以下是失物招领管理系统客户端中所有函数的意义解释，按模块划分。(部分内容已过时，仅供参考)(更新时间: 2026年8月5日 3:28)
