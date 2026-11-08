@@ -1,12 +1,22 @@
 # -*- coding: utf-8 -*-
-"""拍照 + 物品识别。
+"""全自动存物拍照：打开摄像头 → 实时识别 → 识别到物品立刻裁剪保存。
 
-拍照流程：打开摄像头实时预览 → 预览画面上直接框出识别到的物品 →
-按空格拍照（对原始帧再做一次识别确认）→ 返回照片与识别结果。
-按 ESC 取消。没有摄像头时填 config.CAMERA_TEST_IMAGE 可用图片模拟拍摄。
+流程（无需用户操作）：
+    capture_item_auto()
+      ├─ 打开摄像头，逐帧推理
+      ├─ 连续 N 帧识别到同一类物品（N = AUTO_CAPTURE_CONFIRM_FRAMES）
+      ├─ 按检测框裁剪（外扩 CROP_PADDING_RATIO），保存到 files/temp/item.jpg
+      └─ 返回识别结果，交给 store_ui 继续「上传 → 开锁」
+
+返回值统一为 dict：
+    {'status': 'ok',        'item': {...}, 'path': '...'}
+    {'status': 'cancelled'}                    用户按 ESC
+    {'status': 'no_item'}                      超时未识别到物品
+    {'status': 'camera_error', 'detail': '...'} 摄像头打不开
 """
 
 import os
+import time
 
 import cv2
 from PIL import Image, ImageTk
@@ -15,13 +25,13 @@ import tkinter.messagebox as messagebox
 import config
 import item_recognizer
 
-WINDOW_NAME = "Take Photo - SPACE: capture   ESC: cancel"
-TEMP_PHOTO_NAME = "a.jpg"
+WINDOW_NAME = "Store Item - auto capture   (ESC: cancel)"
+TEMP_PHOTO_NAME = "item.jpg"
 PREVIEW_MAX = (400, 300)
 
 
 def temp_photo_path():
-    """拍照暂存路径：files/temp/a.jpg"""
+    """裁剪后的物品图：files/temp/item.jpg"""
     return os.path.join(config.TEMP_DIR, TEMP_PHOTO_NAME)
 
 
@@ -31,50 +41,88 @@ def _recognizer():
     return item_recognizer.get_recognizer()
 
 
-def _best(frame, recognizer):
-    if recognizer is None or frame is None:
+def crop_item(frame, box, padding=None):
+    """按检测框裁剪物品，四周按比例外扩一点避免切边。"""
+    if frame is None or not box:
         return None
-    items = recognizer.recognize(frame)
-    return items[0] if items else None
+    ratio = config.CROP_PADDING_RATIO if padding is None else padding
+    h, w = frame.shape[:2]
+    x, y, bw, bh = [int(v) for v in box]
+    px, py = int(bw * ratio), int(bh * ratio)
+    x0, y0 = max(0, x - px), max(0, y - py)
+    x1, y1 = min(w, x + bw + px), min(h, y + bh + py)
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return None
+    return frame[y0:y1, x0:x1]
 
 
-def capture_item_photo():
-    """拍照并自动识别物品。
+def _save_crop(frame, box):
+    """裁剪并保存，返回 (路径, 裁剪尺寸) 或 (None, None)。"""
+    crop = crop_item(frame, box)
+    if crop is None:
+        return None, None
+    path = temp_photo_path()
+    ok, buf = cv2.imencode(".jpg", crop, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+    if not ok:
+        return None, None
+    buf.tofile(path)
+    return path, (crop.shape[1], crop.shape[0])
 
-    返回 (是否成功拍照, 识别结果)。
-    识别结果形如 {'label': 'suitcase', 'label_cn': '行李箱', 'score': 0.9, 'box': [...]}；
-    没识别到物品时返回 None（照片仍然有效）。
-    """
-    photo_path = temp_photo_path()
 
-    # ---- 无摄像头联调模式 ----
-    if config.CAMERA_TEST_IMAGE:
-        if not os.path.isfile(config.CAMERA_TEST_IMAGE):
-            messagebox.showerror("错误", "CAMERA_TEST_IMAGE 指向的图片不存在：\n%s"
-                                 % config.CAMERA_TEST_IMAGE)
-            return False, None
-        frame = cv2.imread(config.CAMERA_TEST_IMAGE)
-        if frame is None:
-            messagebox.showerror("错误", "无法读取测试图片：\n%s" % config.CAMERA_TEST_IMAGE)
-            return False, None
-        cv2.imwrite(photo_path, frame)
-        return True, _best(frame, _recognizer())
+class _StillImageSource:
+    """无摄像头自检：把一张图片当作"摄像头画面"喂给同一个识别循环。"""
 
-    # ---- 摄像头模式 ----
+    def __init__(self, path):
+        self.frame = cv2.imread(path)
+        self.path = path
+
+    def read(self):
+        return (self.frame is not None), self.frame
+
+    def release(self):
+        pass
+
+
+def capture_item_auto():
+    """打开摄像头并自动抓拍物品。返回见模块文档。"""
+    # 清掉上一次的裁剪图，避免误传旧图
+    stale = temp_photo_path()
+    if os.path.exists(stale):
+        try:
+            os.remove(stale)
+        except OSError:
+            pass
+
     recognizer = _recognizer()
-    cap = item_recognizer.open_camera(config.CAMERA_INDEX)
-    if cap is None:
-        messagebox.showerror(
-            "错误",
-            "无法打开摄像头（序号 %s）。\n请检查摄像头连接，或在 files/config.json 中调整 CAMERA_INDEX。"
-            % config.CAMERA_INDEX,
-        )
-        return False, None
+    if recognizer is None:
+        return {"status": "camera_error",
+                "detail": "未加载物品识别模型，无法自动识别。\n请检查 models/yolo11n.onnx。"}
 
-    captured = False
-    result = None
-    items = []
-    index = 0
+    # 自检模式与真实摄像头走同一套循环，只是画面来源不同
+    if config.CAMERA_TEST_IMAGE:
+        cap = _StillImageSource(config.CAMERA_TEST_IMAGE)
+        if cap.frame is None:
+            return {"status": "camera_error",
+                    "detail": "无法读取测试图片：\n%s" % config.CAMERA_TEST_IMAGE}
+    else:
+        cap = item_recognizer.open_camera(config.CAMERA_INDEX)
+        if cap is None:
+            return {"status": "camera_error",
+                    "detail": "无法打开摄像头（序号 %s）。\n请检查摄像头连接，"
+                              "或在 files/config.json 中调整 CAMERA_INDEX。" % config.CAMERA_INDEX}
+
+    confirm_frames = max(1, int(config.AUTO_CAPTURE_CONFIRM_FRAMES))
+    timeout = float(config.AUTO_TIMEOUT_SEC)
+    started = time.time()
+
+    status = "no_item"
+    detail = None
+    item = None
+    path = None
+    stable = 0
+    last_label = None
+    read_fails = 0
+
     try:
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(WINDOW_NAME, 960, 720)
@@ -85,32 +133,54 @@ def capture_item_photo():
         while True:
             ok, frame = cap.read()
             if not ok or frame is None:
+                # 有些后端（如 Windows MSMF）会"打开成功但读不到帧"，不能死等
+                read_fails += 1
+                if read_fails > 60:
+                    status = "camera_error"
+                    detail = ("摄像头已打开但读不到画面（序号 %s）。\n"
+                              "请检查摄像头是否被其他程序占用，"
+                              "或在 files/config.json 中调整 CAMERA_INDEX。" % config.CAMERA_INDEX)
+                    break
+                time.sleep(0.03)
                 continue
+            read_fails = 0
 
-            # 预览降频识别：每 3 帧一次，够用又不卡
-            if recognizer is not None and index % 3 == 0:
-                items = recognizer.recognize(frame)
-            index += 1
+            items = recognizer.recognize(frame)
+            best = items[0] if items else None
 
-            if recognizer is None:
-                hint = "未加载识别模型 · 空格=拍照  ESC=取消"
-            elif items:
-                hint = "识别到：%s %.0f%% · 空格=拍照  ESC=取消" % (
-                    items[0]["label_cn"], items[0]["score"] * 100)
+            if best is None:
+                stable, last_label = 0, None
+                hint = "请把物品放进取景框 · ESC 取消"
             else:
-                hint = "请把物品对准摄像头 · 空格=拍照  ESC=取消"
+                # 连续同一类才算稳定，避免单帧误检直接开柜
+                if best["label"] == last_label:
+                    stable += 1
+                else:
+                    stable, last_label = 1, best["label"]
+                hint = "识别到 %s %.0f%% · 正在存放…" % (
+                    best["label_cn"], best["score"] * 100)
 
             cv2.imshow(WINDOW_NAME, item_recognizer.draw_items(frame, items, hint))
             key = cv2.waitKey(1) & 0xFF
-            if key == 32:  # 空格
-                cv2.imwrite(photo_path, frame)
-                captured = True
-                # 用原始帧复算一次，保证存档照片与识别结果一致
-                result = _best(frame, recognizer)
+
+            if key in (27, ord("q")):
+                status = "cancelled"
                 break
-            if key in (27, ord("q")):  # ESC / q
+
+            if best is not None and stable >= confirm_frames:
+                saved, size = _save_crop(frame, best["box"])
+                if saved:
+                    status = "ok"
+                    item = dict(best, crop_size=size)
+                    path = saved
+                    break
+
+            if timeout > 0 and time.time() - started > timeout:
+                status = "no_item"
                 break
+
             if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
+                status = "cancelled"
                 break
     finally:
         cap.release()
@@ -120,7 +190,10 @@ def capture_item_photo():
             pass
         cv2.waitKey(1)
 
-    return captured, result
+    result = {"status": status, "item": item, "path": path}
+    if detail:
+        result["detail"] = detail
+    return result
 
 
 def show_photo_preview(photo_label, photo_path):
@@ -128,7 +201,6 @@ def show_photo_preview(photo_label, photo_path):
     if not os.path.exists(photo_path):
         return
     image = Image.open(photo_path)
-    # 限制预览大小
     max_width, max_height = PREVIEW_MAX
     img_width, img_height = image.size
     scale = min(max_width / img_width, max_height / img_height)
@@ -136,4 +208,4 @@ def show_photo_preview(photo_label, photo_path):
     resized = image.resize(new_size, Image.Resampling.LANCZOS)
     photo = ImageTk.PhotoImage(resized)
     photo_label.config(image=photo, text="")
-    photo_label.image = photo  # 保持引用
+    photo_label.image = photo

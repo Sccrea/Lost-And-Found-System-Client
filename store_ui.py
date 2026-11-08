@@ -1,10 +1,15 @@
 # -*- coding: utf-8 -*-
-"""存物品界面：拍照 → 自动识别物品 → 选择/更正类别 → 上传服务端 → 开柜。"""
+"""存物品：全自动一步到位。
+
+用户点「存物品」后不再需要任何操作：
+    打开摄像头 → 实时识别 → 识别到物品立刻裁剪保存 → 上传服务端 → 开锁 → 提示开锁成功
+异常情况（无摄像头 / 未识别到物品 / 网络错误 / 无空闲柜）会给出明确提示并返回主界面。
+"""
 
 import os
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
 import requests
 
 import config
@@ -13,192 +18,127 @@ import network_manager
 import open_lock
 import photo_manager
 
-CATEGORY_CHOICES = list(item_recognizer.TARGET_CLASSES.values()) + [item_recognizer.UNKNOWN_LABEL_CN]
-
 
 class StoreUI:
-    """存物品界面及逻辑"""
+    """存物品界面及逻辑（自动识别 + 自动开锁）"""
 
     def __init__(self, parent_app):
-        self.parent = parent_app  # 主应用实例，用于切换界面
+        self.parent = parent_app
         self.root = parent_app.root
-        self.recognition = None           # 最近一次识别结果
-        self.photo_label = None
-        self.result_label = None
-        self.category_var = None
+
+    # ------------------------------------------------------------ 入口
+    def show(self):
+        """点击「存物品」后立即打开摄像头开始识别。"""
+        self._clear_window()
+        self._show_progress("正在打开摄像头…", "请把物品朝向镜头")
+        # 先让界面画出来，再进入阻塞的摄像头循环
+        self.root.after(60, self._run_auto_flow)
 
     # ------------------------------------------------------------ 界面
-    def show(self):
-        """显示存物品主界面（拍照、识别结果、类别选择）"""
-        self._clear_window()
-        self.recognition = None
-
-        # 清掉上一次的暂存照片，避免误存旧照片
-        stale = photo_manager.temp_photo_path()
-        if os.path.exists(stale):
-            try:
-                os.remove(stale)
-            except OSError:
-                pass
-
-        main_frame = tk.Frame(self.root, bg='#f0f0f0')
-        main_frame.pack(expand=True, fill='both', padx=20, pady=20)
-
-        # 滚动条支持
-        canvas = tk.Canvas(main_frame, bg='#f0f0f0')
-        scrollbar = tk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = tk.Frame(canvas, bg='#f0f0f0')
-        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        # 返回按钮
-        back_btn = tk.Button(scrollable_frame, text="返回", bg='#CCCCCC', font=('微软雅黑', 10), width=8,
-                             command=self.parent.show_main_interface)
-        back_btn.grid(row=0, column=0, sticky='nw', pady=(0, 20))
-
-        tk.Label(scrollable_frame, text="存放物品", bg='#f0f0f0',
-                 font=('微软雅黑', 18, 'bold')).grid(row=1, column=0, sticky='w', pady=(0, 10))
-
-        start_row = 2
-        if item_recognizer.get_recognizer() is not None and config.ENABLE_RECOGNITION:
-            tk.Label(scrollable_frame,
-                     text="拍照后会自动识别物品；若识别有误，可在下拉框中更正。",
-                     bg='#f0f0f0', fg='#666666', font=('微软雅黑', 10)).grid(
-                row=start_row, column=0, sticky='w', pady=(0, 12))
-        else:
-            tk.Label(scrollable_frame,
-                     text="未加载识别模型或识别已关闭，拍照后请手动选择物品类别。",
-                     bg='#f0f0f0', fg='#C62828', font=('微软雅黑', 10)).grid(
-                row=start_row, column=0, sticky='w', pady=(0, 12))
-
-        # 拍照按钮
-        photo_btn = tk.Button(scrollable_frame, text="拍照", bg='#2196F3', fg='white',
-                              font=('微软雅黑', 12, 'bold'), width=10, height=2,
-                              command=self._take_photo_wrapper)
-        photo_btn.grid(row=3, column=0, sticky='w', pady=(10, 10))
-
-        # 照片预览区域
-        preview_frame = tk.Frame(scrollable_frame, bg='#f0f0f0')
-        preview_frame.grid(row=4, column=0, sticky='w', pady=(0, 16))
-        tk.Label(preview_frame, text="照片预览:", bg='#f0f0f0',
-                 font=('微软雅黑', 10)).pack(anchor='w', pady=(0, 5))
-        self.photo_label = tk.Label(preview_frame, text="暂无照片", bg='#e0e0e0',
-                                    relief='solid', borderwidth=1)
-        self.photo_label.pack(anchor='w')
-
-        # 识别结果区域
-        result_frame = tk.Frame(scrollable_frame, bg='#f0f0f0')
-        result_frame.grid(row=5, column=0, sticky='w', pady=(0, 16))
-
-        tk.Label(result_frame, text="识别结果:", bg='#f0f0f0',
-                 font=('微软雅黑', 10)).grid(row=0, column=0, sticky='w', pady=(0, 5))
-        self.result_label = tk.Label(result_frame, text="等待拍照…", bg='#f0f0f0',
-                                     fg='#666666', font=('微软雅黑', 14, 'bold'))
-        self.result_label.grid(row=1, column=0, columnspan=2, sticky='w', pady=(0, 10))
-
-        tk.Label(result_frame, text="物品类别（可更正）:", bg='#f0f0f0',
-                 font=('微软雅黑', 10)).grid(row=2, column=0, sticky='w', pady=(0, 5))
-        self.category_var = tk.StringVar(value=item_recognizer.UNKNOWN_LABEL_CN)
-        self.category_box = ttk.Combobox(result_frame, textvariable=self.category_var,
-                                         values=CATEGORY_CHOICES, state='readonly', width=16,
-                                         font=('微软雅黑', 12))
-        self.category_box.grid(row=3, column=0, sticky='w')
-
-        # 存物品按钮
-        next_btn = tk.Button(scrollable_frame, text="存物品", bg='#4CAF50', fg='white',
-                             font=('微软雅黑', 12, 'bold'), width=10,
-                             command=self._next_step)
-        next_btn.grid(row=6, column=0, sticky='w', pady=(16, 0))
-
     def _clear_window(self):
         for widget in self.root.winfo_children():
             widget.destroy()
 
-    # ------------------------------------------------------------ 拍照 / 识别
-    def _take_photo_wrapper(self):
-        captured, result = photo_manager.capture_item_photo()
-        if not captured:
-            return
-        self.recognition = result
-        photo_manager.show_photo_preview(self.photo_label, photo_manager.temp_photo_path())
-        self.result_label.config(text="识别中…", fg='#666666')
+    def _show_progress(self, text, sub=None):
+        """全屏状态提示（等待摄像头时使用）。"""
+        self._clear_window()
+        frame = tk.Frame(self.root, bg='#f0f0f0')
+        frame.pack(expand=True, fill='both')
+        tk.Label(frame, text=text, bg='#f0f0f0', fg='#333333',
+                 font=('微软雅黑', 28, 'bold')).pack(expand=True)
+        if sub:
+            tk.Label(frame, text=sub, bg='#f0f0f0', fg='#666666',
+                     font=('微软雅黑', 16)).pack(pady=(0, 40))
         self.root.update_idletasks()
-        self._update_recognition_ui()
 
-    def _update_recognition_ui(self):
-        if not config.ENABLE_RECOGNITION:
-            self.result_label.config(text="物品识别已关闭，请手动选择类别", fg='#C62828')
-            return
-        if item_recognizer.get_recognizer() is None:
-            self.result_label.config(text="未加载识别模型，请手动选择类别", fg='#C62828')
-            return
-
-        result = self.recognition
-        if result:
-            self.result_label.config(
-                text="已识别：%s（置信度 %.0f%%）" % (result['label_cn'], result['score'] * 100),
-                fg='#2E7D32',
-            )
-            self.category_var.set(result['label_cn'])
+    def _back_to_main(self, delay=0):
+        if delay:
+            self.root.after(delay, self.parent.show_main_interface)
         else:
-            self.result_label.config(text="未识别到常见物品，请手动选择类别", fg='#C62828')
-            self.category_var.set(item_recognizer.UNKNOWN_LABEL_CN)
+            self.parent.show_main_interface()
 
-    # ------------------------------------------------------------ 存物
-    def _next_step(self):
-        temp_photo = photo_manager.temp_photo_path()
-        if not os.path.exists(temp_photo):
-            messagebox.showwarning("输入错误", "请先拍照！")
+    # ------------------------------------------------------------ 主流程
+    def _run_auto_flow(self):
+        # 1) 打开摄像头 + 识别 + 裁剪保存
+        result = photo_manager.capture_item_auto()
+        status = result.get("status")
+
+        if status == "cancelled":
+            self._back_to_main()
             return
 
-        category = self.category_var.get() if self.category_var else item_recognizer.UNKNOWN_LABEL_CN
-        confidence = self.recognition['score'] if self.recognition else None
+        if status == "no_item":
+            messagebox.showwarning(
+                "未识别到物品",
+                "没有在画面中识别到可存放的物品。\n\n"
+                "支持：背包、手提包、行李箱、瓶子、杯子、手机、书本。\n"
+                "请将物品放正、靠近镜头后重试。",
+            )
+            self._back_to_main()
+            return
 
-        # 从服务端获取柜子状态
+        if status == "camera_error":
+            messagebox.showerror("摄像头异常", result.get("detail", "无法打开摄像头"))
+            self._back_to_main()
+            return
+
+        item = result["item"]
+        photo_path = result["path"]
+        category = item["label_cn"]
+        confidence = item["score"]
+
+        # 2) 找空闲柜
+        self._show_progress("正在存放…", "%s  %.0f%%" % (category, confidence * 100))
         try:
             lockers = network_manager.get_lockers_status()
         except requests.exceptions.RequestException:
             messagebox.showerror("网络错误", "无法连接至服务器，请检查网络连接")
+            self._back_to_main()
             return
 
         free_lock = None
-        for lid, info in lockers.items():
-            if info['status'] == 0:
+        for lid, info in sorted(lockers.items()):
+            if info.get("status") == 0:
                 free_lock = lid
                 break
         if free_lock is None:
             messagebox.showerror("无空闲柜子", "当前没有空闲柜子，请稍后再试。")
+            self._back_to_main()
             return
 
-        self._confirm_store(free_lock, temp_photo, category, confidence)
-
-    def _confirm_store(self, locker_id, temp_photo_path, category, confidence):
-        detail = "物品：%s" % category
-        if self.recognition:
-            detail += "（自动识别 %s，置信度 %.0f%%）" % (
-                self.recognition['label_cn'], self.recognition['score'] * 100)
-        confirm = messagebox.askyesno(
-            "确认存放",
-            "确认将物品存放至 %s 号柜吗？\n\n%s" % (locker_id, detail),
-        )
-        if not confirm:
-            return
-
+        # 3) 上传裁剪后的物品图 + 识别结果
         try:
-            result = network_manager.store_item(
-                locker_id, temp_photo_path,
+            network_manager.store_item(
+                free_lock, photo_path,
                 category=category, confidence=confidence,
             )
-            open_lock.open_lock(lock_number=locker_id)
-            messagebox.showinfo(
-                "操作成功",
-                "正在打开 %s 号柜...\n\n物品存放成功！\n物品类别：%s" % (locker_id, category),
-            )
-            self.parent.show_main_interface()
         except requests.exceptions.RequestException:
-            messagebox.showerror("网络错误", "无法连接至服务器，请检查网络连接")
-        except Exception as e:
-            messagebox.showerror("错误", "存物失败：%s" % e)
+            messagebox.showerror("网络错误", "无法连接至服务器，物品未存入，请检查网络连接")
+            self._back_to_main()
+            return
+        except Exception as exc:
+            messagebox.showerror("存物失败", "上传物品信息失败：%s" % exc)
+            self._back_to_main()
+            return
+
+        # 4) 直接开锁（不做二次确认）
+        lock_error = None
+        try:
+            open_lock.open_lock(lock_number=free_lock)
+        except Exception as exc:
+            lock_error = exc
+
+        # 5) 返回结果
+        if lock_error is not None:
+            messagebox.showerror(
+                "开锁失败",
+                "物品已登记到 %s 号柜，但柜门未能打开：%s\n\n"
+                "请联系管理员处理（检查电锁与串口配置）。" % (free_lock, lock_error),
+            )
+        else:
+            messagebox.showinfo(
+                "开锁成功",
+                "%s 号柜已打开\n\n物品：%s（置信度 %.0f%%）\n"
+                "请将物品放入柜中并关好柜门。" % (free_lock, category, confidence * 100),
+            )
+        self._back_to_main()
