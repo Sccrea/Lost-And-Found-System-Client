@@ -1,8 +1,15 @@
+import os
+import sys
+import threading
+import traceback
+from datetime import datetime
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 from store_ui import StoreUI
 from take_ui import TakeUI
 import config
+import item_recognizer
 import network_manager
 import requests
 
@@ -81,10 +88,36 @@ class LostAndFoundApp:
             self.root.quit()
             self.root.destroy()
 
+def _write_crash_log(exc_text):
+    """打包成 windowed exe 后没有控制台，把异常落到 files/error.log 便于排查。"""
+    try:
+        os.makedirs(config.FILES_DIR, exist_ok=True)
+        path = os.path.join(config.FILES_DIR, "error.log")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("[%s]\n%s\n\n" % (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), exc_text))
+    except Exception:
+        pass
+
+
 def main():
-    root = tk.Tk()
-    app = LostAndFoundApp(root)
-    root.mainloop()
+    try:
+        root = tk.Tk()
+        app = LostAndFoundApp(root)
+        # 后台预热识别模型，避免第一次拍照卡顿
+        if config.ENABLE_RECOGNITION:
+            threading.Thread(target=item_recognizer.get_recognizer, daemon=True).start()
+        root.mainloop()
+    except Exception:
+        _write_crash_log(traceback.format_exc())
+        raise
+
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        try:
+            messagebox.showerror("程序异常", "程序发生异常，详情见 files/error.log")
+        except Exception:
+            pass
+        sys.exit(1)

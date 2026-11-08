@@ -15,8 +15,12 @@ def get_lockers_status():
     # 将 JSON 返回的字符串键转为整数键
     return {int(k): v for k, v in data.items()}
 
-def store_item(locker_id, photo_path):
-    """存物：上传照片和数据，失败时抛出异常"""
+def store_item(locker_id, photo_path, category=None, confidence=None):
+    """存物：上传照片、识别到的物品类别和数据，失败时抛出异常。
+
+    服务端旧版本会忽略 item_category / item_confidence 两个附加字段，
+    因此这里失败与否只取决于原有三个字段，向后兼容。
+    """
     url = f"{SERVER_URL}/api/store"
     with open(photo_path, 'rb') as f:
         files = {'photo': f}
@@ -24,6 +28,10 @@ def store_item(locker_id, photo_path):
             'terminal_id': config.TERMINAL_ID,
             'locker_id': locker_id
         }
+        if category:
+            data['item_category'] = category
+        if confidence is not None:
+            data['item_confidence'] = "%.3f" % confidence
         resp = requests.post(url, data=data, files=files, timeout=10, verify=request_verify())
         resp.raise_for_status()
         return resp.json()

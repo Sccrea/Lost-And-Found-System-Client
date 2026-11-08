@@ -56,6 +56,46 @@ pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 如果服务器使用公网 CA 签发的证书（如 Let's Encrypt），`SERVER_CERT_PATH` 保持为空即可。不要把服务器返回的 `fullchain.pem` 填到这里——它是服务器证书链，不是 CA 证书包，会导致 `unable to get issuer certificate`。
 
+## 存物：全自动识别 + 自动开锁
+
+点击「存物品」后**用户不需要任何操作**：
+
+```
+点击「存物品」
+  → 立刻打开摄像头，逐帧识别
+  → 识别到物品（连续 N 帧同一类）立刻抓拍，并按检测框裁剪出物品
+  → 上传裁剪图 + 识别类别到 /api/store
+  → 直接开锁（无二次确认）
+  → 弹出「开锁成功」结果，返回主界面
+```
+
+- 模型：YOLO11n（ONNX），CPU 推理，单帧约 60~100 ms，无需 GPU、无需联网。
+- 支持类别（COCO 子集）：背包、手提包、行李箱、瓶子、杯子、手机、书本。
+- 识别结果随 `/api/store` 一起提交，字段为 `item_category`、`item_confidence`；
+  旧版服务端会忽略这两个附加字段（不影响存物）。
+- 异常处理：无摄像头 / 未识别到物品 / 无空闲柜 / 网络错误都会给出明确提示并返回主界面，
+  不会出现"开了一半"的中间状态；开锁失败时会提示柜号，物品记录已入库便于人工处理。
+- 识别时按 ESC 可取消本次存物。
+
+模型文件不入库（约 10 MB），发布版 exe 已内置；源码运行需要把 `yolo11n.onnx` 放到
+`models/` 目录（或设置环境变量 `LOSTFOUND_MODEL_PATH` 指向模型）。exe 同级放一份
+`models/yolo11n.onnx` 会优先生效，方便现场换模型而不用重新打包。
+
+`files/config.json` 中与识别/自动存物相关的配置：
+
+| 字段 | 默认值 | 说明 |
+| :--- | :--- | :--- |
+| `ENABLE_RECOGNITION` | `true` | 关闭后无法自动识别，存物会提示 |
+| `CAMERA_INDEX` | `0` | 摄像头序号，多摄像头时调整 |
+| `SCORE_THRESHOLD` | `0.5` | 置信度阈值，调低更容易识别、误判也更多 |
+| `AUTO_CAPTURE_CONFIRM_FRAMES` | `2` | 连续 N 帧识别到同一类才抓拍，防止单帧误检直接开柜；设 1 为最"秒拍" |
+| `AUTO_TIMEOUT_SEC` | `120` | 画面中一直没物品时的等待上限（秒），0 表示一直等 |
+| `CROP_PADDING_RATIO` | `0.08` | 裁剪物品时四周外扩比例，避免切边 |
+| `CAMERA_TEST_IMAGE` | `""` | 无摄像头联调用：填图片路径则用该图模拟镜头画面 |
+
+> 没有摄像头时，把 `CAMERA_TEST_IMAGE` 指向一张物品照片，即可完整走通
+> 「识别 → 裁剪 → 上传 → 开锁」流程，便于部署前自检。
+
 ## 构建可执行文件
 可用Pyinstaller编译:
 ```bash
@@ -64,6 +104,13 @@ pip install pyinstaller
 
 ```bash
 pyinstaller --onefile main_app.py
+```
+
+带物品识别的打包命令（模型内置进 exe，单文件免安装）：
+
+```bash
+pyinstaller --onefile --windowed --name LostAndFoundClient-ItemRecognition ^
+  --add-data "models/yolo11n.onnx;models" main_app.py
 ```
 ## 函数意义解释
 以下是失物招领管理系统客户端中所有函数的意义解释，按模块划分。(部分内容已过时，仅供参考)(更新时间: 2026年8月5日 3:28)
