@@ -78,6 +78,13 @@ class LostAndFoundApp:
         take_btn.pack(side=tk.LEFT, expand=True, fill='both', padx=20, pady=40)
         store_btn.pack(side=tk.LEFT, expand=True, fill='both', padx=20, pady=40)
 
+        # 左上角退出按钮（点击后仍需确认，避免误触）
+        quit_btn = tk.Button(main_frame, text="退出", bg='#9E9E9E', fg='white',
+                             font=('微软雅黑', 12, 'bold'), bd=0,
+                             activebackground='#757575', activeforeground='white',
+                             command=self._quit_app)
+        quit_btn.place(x=12, y=12, width=96, height=46)
+
     def _clear_window(self):
         for widget in self.root.winfo_children():
             widget.destroy()
