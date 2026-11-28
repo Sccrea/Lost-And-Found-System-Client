@@ -54,6 +54,7 @@ class LostAndFoundApp:
             idle_seconds=getattr(config, "SCREEN_OFF_SEC", 30),
             on_before_sleep=self._prepare_sleep,
             enabled=getattr(config, "SCREEN_OFF_ENABLE", True),
+            mode=getattr(config, "SCREEN_OFF_MODE", "black"),
         )
 
         # 显示主界面

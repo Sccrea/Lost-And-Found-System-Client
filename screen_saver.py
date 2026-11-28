@@ -65,19 +65,27 @@ def set_display_power(on):
 
 
 class ScreenSaver:
-    """空闲自动熄屏 + 触摸唤醒。"""
+    """空闲自动熄屏 + 触摸唤醒。
 
-    def __init__(self, root, idle_seconds=30, on_before_sleep=None, enabled=True):
+    mode:
+      "black" — 保持 HDMI 信号，只画纯黑（显示器不会弹 "No Signal"，背光仍亮）
+      "off"   — 关闭显示输出（省电，但部分显示器会显示自己的 "No Signal" 画面）
+    """
+
+    def __init__(self, root, idle_seconds=30, on_before_sleep=None, enabled=True,
+                 mode="black"):
         self.root = root
         self.idle_seconds = float(idle_seconds)
         self.on_before_sleep = on_before_sleep
         self.enabled = enabled
+        self.mode = mode or "black"
         self.last_activity = time.time()
         self.off = False
         self.overlay = None
+        self.power_control = bool(enabled) and self.mode == "off"
 
         # 启动时确保屏幕是亮的（避免上次异常退出把屏幕留在关闭状态）
-        if self.enabled:
+        if self.power_control:
             set_display_power(True)
 
         root.bind_all("<Button-1>", self._on_activity, add="+")
@@ -113,14 +121,14 @@ class ScreenSaver:
                 pass
         self._show_overlay()
         self.root.update_idletasks()
-        if self.enabled:
+        if self.power_control:
             set_display_power(False)
 
     def wake(self):
         if not self.off:
             return
         self.off = False
-        if self.enabled:
+        if self.power_control:
             set_display_power(True)
         self._hide_overlay()
         self.last_activity = time.time()
@@ -151,5 +159,5 @@ class ScreenSaver:
         """退出前把屏幕恢复，避免黑屏留在现场。"""
         self.off = False
         self._hide_overlay()
-        if self.enabled:
+        if self.power_control:
             set_display_power(True)
