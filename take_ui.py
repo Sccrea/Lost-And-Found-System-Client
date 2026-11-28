@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 import os
 import requests
 from PIL import Image, ImageTk
@@ -46,37 +46,41 @@ class TakeUI:
             self._show_locker_selection()
 
     def _show_locker_selection(self):
-        """第二步：显示柜子选择界面"""
-
+        """第二步：单页显示物品照片 + 柜子下拉选择 + 确认取物（不需要滚动）。"""
         self._clear_window()
+
         main_frame = tk.Frame(self.root, bg='#f0f0f0')
-        main_frame.pack(expand=True, fill='both', padx=20, pady=20)
+        main_frame.pack(expand=True, fill='both')
 
-        # 滚动区域
-        canvas = tk.Canvas(main_frame, bg='#f0f0f0')
-        scrollbar = tk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
-        scrollable = tk.Frame(canvas, bg='#f0f0f0')
-        scrollable.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0,0), window=scrollable, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        # ---------- 顶栏 ----------
+        top_bar = tk.Frame(main_frame, bg='#f0f0f0', height=64)
+        top_bar.pack(fill='x', padx=16, pady=(12, 4))
+        top_bar.pack_propagate(False)
 
-        # 返回按钮
-        back_btn = tk.Button(scrollable, text="返回", bg='#CCCCCC', font=('微软雅黑',14,'bold'), width=10,
-                             command=self.parent.show_main_interface)
-        back_btn.grid(row=0, column=0, sticky='nw', pady=(0,0))
+        tk.Button(top_bar, text="返回", bg='#CCCCCC', font=('微软雅黑', 16, 'bold'), width=8,
+                  command=self.parent.show_main_interface).pack(side='left')
 
-        # 图例
-        top_frame = tk.Frame(scrollable, bg='#f0f0f0')
-        top_frame.grid(row=1, column=0, columnspan=4, pady=(0,0), sticky='ew')
-        tk.Label(top_frame, text="选择要取物的柜子", bg='#f0f0f0', font=('微软雅黑',16,'bold')).pack(side=tk.LEFT, padx=(40,10))
-        legend_frame = tk.Frame(top_frame, bg='#f0f0f0')
-        legend_frame.pack(side=tk.LEFT)
-        tk.Label(legend_frame, text="有物品", bg='#4CAF50', fg='white', width=8,
-                 font=('微软雅黑',12,'bold')).pack(side=tk.LEFT, padx=5)
-        tk.Label(legend_frame, text="无物品", bg='#9E9E9E', fg='white', width=8,
-                 font=('微软雅黑',12,'bold')).pack(side=tk.LEFT, padx=5)
+        tk.Label(top_bar, text="取物人：%s" % (self.taker_name or ""), bg='#f0f0f0',
+                 font=('微软雅黑', 20, 'bold'), fg='#1f6feb').pack(side='left', padx=24)
+
+        tk.Label(top_bar, text="位置：%s" % config.LOCATION, bg='#f0f0f0',
+                 font=('微软雅黑', 14), fg='#555555').pack(side='right')
+
+        # ---------- 主体：左图右信息 ----------
+        body = tk.Frame(main_frame, bg='#f0f0f0')
+        body.pack(fill='both', expand=True, padx=16, pady=(0, 12))
+
+        # 右栏先 pack，保证贴住窗口右侧
+        right = tk.Frame(body, bg='#f0f0f0', width=340)
+        right.pack(side='right', fill='y', padx=(18, 0))
+        right.pack_propagate(False)
+
+        left = tk.Frame(body, bg='#e2e8f0')
+        left.pack(side='left', fill='both', expand=True)
+
+        self.photo_label = tk.Label(left, bg='#e2e8f0', text="正在加载物品照片…",
+                                    font=('微软雅黑', 14), fg='#64748b')
+        self.photo_label.pack(fill='both', expand=True)
 
         # 从服务端获取柜子状态
         try:
@@ -87,73 +91,137 @@ class TakeUI:
                            on_close=lambda _v: self.parent.show_main_interface())
             return
 
-        self.locker_buttons = []
-        for i in range(1, 9):
-            row = 3 + (i-1)//4
-            col = (i-1)%4
-            status = self.lockers_data.get(i, {}).get('status', 0)
-            bg = '#4CAF50' if status == 1 else '#9E9E9E'
-            state = tk.NORMAL if status == 1 else tk.DISABLED
-            text = f"{i}号柜"
-            btn = tk.Button(scrollable, text=text, bg=bg, fg='white', font=('微软雅黑',16,'bold'),
-                            width=10, height=4, state=state,
-                            command=lambda lid=i: self._select_locker(lid))
-            btn.grid(row=row, column=col, padx=10, pady=10)
-            self.locker_buttons.append(btn)
+        # 柜子下拉列表（8 个柜子合成一个下拉框，节省空间）
+        tk.Label(right, text="选择柜子", bg='#f0f0f0', font=('微软雅黑', 16, 'bold'),
+                 anchor='w').pack(fill='x', pady=(6, 4))
 
-        # 信息显示区
-        self.info_frame = tk.Frame(scrollable, bg='#f0f0f0')
-        self.info_frame.grid(row=5, column=0, columnspan=4, sticky='we', pady=(20,0))
-        self._show_default_info()
+        self.locker_options = []
+        for lid in range(1, 9):
+            status = self.lockers_data.get(lid, {}).get('status', 0)
+            label = "%d 号柜（%s）" % (lid, "有物品" if status == 1 else "空闲")
+            self.locker_options.append((label, lid))
 
-    def _show_default_info(self):
-        """清空信息区并显示默认提示"""
-        for w in self.info_frame.winfo_children():
-            w.destroy()
-        tk.Label(self.info_frame, text="请选择上方柜子查看物品信息", bg='#f0f0f0', font=('微软雅黑',14)).pack(expand=True, fill='both', pady=50)
+        self.locker_var = tk.StringVar()
+        self.locker_combo = ttk.Combobox(
+            right, textvariable=self.locker_var, state='readonly',
+            values=[label for label, _ in self.locker_options],
+            font=('微软雅黑', 18), width=18, height=8,
+        )
+        self.locker_combo.pack(fill='x', ipady=8)
+        self.locker_combo.bind('<<ComboboxSelected>>', self._on_locker_chosen)
 
-    def _select_locker(self, locker_id):
-        """选中某个柜子，高亮并显示物品信息"""
+        # 物品信息
+        self.info_frame = tk.Frame(right, bg='#f0f0f0')
+        self.info_frame.pack(fill='both', expand=True, pady=(14, 0))
+
+        # 确认取物
+        self.take_btn = tk.Button(right, text="确认取物", bg='#4CAF50', fg='white',
+                                  font=('微软雅黑', 22, 'bold'), width=12, height=2,
+                                  state='disabled', command=self._on_take_clicked)
+        self.take_btn.pack(side='bottom', pady=(10, 6))
+
+        # 默认选中第一个有物品的柜子
+        default_index = None
+        for index, (label, lid) in enumerate(self.locker_options):
+            if self.lockers_data.get(lid, {}).get('status', 0) == 1:
+                default_index = index
+                break
+        if default_index is None:
+            self._show_empty_info()
+        else:
+            self.locker_combo.current(default_index)
+            self._on_locker_chosen()
+
+    # ------------------------------------------------------------ 下拉框事件
+    def _selected_locker_id(self):
+        index = self.locker_combo.current()
+        if 0 <= index < len(self.locker_options):
+            return self.locker_options[index][1]
+        return None
+
+    def _on_locker_chosen(self, event=None):
+        locker_id = self._selected_locker_id()
+        if locker_id is None:
+            return
         self.selected_locker_id = locker_id
-        # 高亮选中的按钮
-        for i, btn in enumerate(self.locker_buttons):
-            if i+1 == locker_id:
-                btn.config(bg='#FF9800')
-            else:
-                status = self.lockers_data.get(i+1, {}).get('status', 0)
-                btn.config(bg='#4CAF50' if status==1 else '#9E9E9E')
-        self._show_item_info(locker_id)
+        item = self.lockers_data.get(locker_id) or {}
+        if item.get('status') == 1:
+            self.take_btn.config(state='normal')
+            self._show_item_info(locker_id, item)
+        else:
+            self.take_btn.config(state='disabled')
+            self._show_empty_info(locker_id)
 
-    def _show_item_info(self, locker_id):
-        """在信息区显示该柜子的物品照片和详情"""
-        for w in self.info_frame.winfo_children():
-            w.destroy()
+    def _on_take_clicked(self):
+        locker_id = self.selected_locker_id
+        if locker_id is None:
+            return
+        item = self.lockers_data.get(locker_id) or {}
+        if item.get('status') != 1:
+            return
+        self._confirm_take(locker_id, item)
 
-        item = self.lockers_data.get(locker_id)
-        if not item or item.get('status') == 0:
-            tk.Label(self.info_frame, text=f"{locker_id}号柜无物品", bg='#f0f0f0', font=('微软雅黑',14)).pack(expand=True, fill='both', pady=50)
+    # ------------------------------------------------------------ 信息区
+    def _show_empty_info(self, locker_id=None):
+        for widget in self.info_frame.winfo_children():
+            widget.destroy()
+        text = "%d 号柜是空的" % locker_id if locker_id else "当前没有可取的物品"
+        tk.Label(self.info_frame, text=text, bg='#f0f0f0', font=('微软雅黑', 16),
+                 fg='#9E9E9E').pack(anchor='w', pady=10)
+        self.photo_label.config(image='', text="（该柜子没有物品）",
+                                font=('微软雅黑', 14), fg='#94a3b8')
+        self.photo_label.image = None
+
+    def _show_item_info(self, locker_id, item=None):
+        """右侧显示柜号/类别/存入时间，左侧显示物品照片。"""
+        item = item or self.lockers_data.get(locker_id) or {}
+        for widget in self.info_frame.winfo_children():
+            widget.destroy()
+
+        rows = [("柜号", "%d 号柜" % locker_id), ("状态", "有物品")]
+        if item.get('store_time'):
+            rows.append(("存入时间", item['store_time']))
+        for key, value in rows:
+            row = tk.Frame(self.info_frame, bg='#f0f0f0')
+            row.pack(fill='x', pady=4)
+            tk.Label(row, text=key, bg='#f0f0f0', font=('微软雅黑', 14),
+                     fg='#64748b', width=8, anchor='w').pack(side='left')
+            tk.Label(row, text=value, bg='#f0f0f0', font=('微软雅黑', 15, 'bold'),
+                     fg='#1f2937', anchor='w', wraplength=240, justify='left').pack(side='left')
+
+        photo_name = item.get('photo_name')
+        self.photo_label.config(image='', text="正在加载物品照片…",
+                                font=('微软雅黑', 14), fg='#64748b')
+        self.photo_label.image = None
+        if not photo_name:
+            self.photo_label.config(text="（该物品没有照片）")
             return
 
-        container = tk.Frame(self.info_frame, bg='#f0f0f0')
-        container.pack(expand=True, fill='both', padx=20, pady=0)
-        tk.Label(container, text=f"{locker_id}号柜物品图片", bg='#f0f0f0', font=('微软雅黑',16,'bold')).pack()
+        self.photo_label.after(10, lambda: self._load_photo(photo_name))
 
-        # 从服务端加载照片
-        photo_name = item.get('photo_name')
-        if photo_name:
-            # 下载到临时目录并显示
-            temp_photo_path = self._download_photo(photo_name)
-            if temp_photo_path:
-                img_label = tk.Label(container, bg='#f0f0f0')
-                img_label.pack(pady=10)
-                photo_manager.show_photo_preview(img_label, temp_photo_path)
-            else:
-                tk.Label(container, text="图片加载失败", bg='#f0f0f0', font=('微软雅黑',12)).pack(pady=10)
+    def _load_photo(self, photo_name):
+        path = self._download_photo(photo_name)
+        if not path:
+            self.photo_label.config(text="图片加载失败", fg='#d64545')
+            return
+        # 布局还没完成时先等一会儿，否则会按 1x1 的尺寸缩放
+        if self.photo_label.winfo_width() < 120 or self.photo_label.winfo_height() < 120:
+            self.photo_label.after(200, lambda: self._load_photo(photo_name))
+            return
 
-        # 取物按钮
-        take_btn = tk.Button(container, text="确认取物", bg='#4CAF50', fg='white', font=('微软雅黑',20,'bold'),
-                             width=12, height=2, command=lambda: self._confirm_take(locker_id, item))
-        take_btn.pack(pady=20)
+        try:
+            image = Image.open(path)
+            max_w = max(self.photo_label.winfo_width() - 24, 320)
+            max_h = max(self.photo_label.winfo_height() - 24, 240)
+            scale = min(max_w / image.width, max_h / image.height)
+            image = image.resize((max(1, int(image.width * scale)),
+                                  max(1, int(image.height * scale))), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(image)
+            self.photo_label.config(image=photo, text='')
+            self.photo_label.image = photo
+        except Exception as exc:
+            print("显示物品照片失败:", exc)
+            self.photo_label.config(text="图片无法显示", fg='#d64545')
 
     def _download_photo(self, photo_name):
         url = network_manager.get_photo_url(photo_name)
