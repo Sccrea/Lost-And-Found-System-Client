@@ -29,16 +29,13 @@ class TakeUI:
 
     def _on_face_done(self, result):
         status = result.get("status")
-        if status == "cancelled":
+        if status in ("cancelled", "timeout", "no_face"):
+            # 触屏：取消 / 30 秒无操作或未识别 → 直接回主界面
             self.parent.show_main_interface()
             return
         if status == "error":
             messagebox.showerror("识别失败",
                                  result.get("detail") or "人脸识别服务器不可用，请检查服务器、人脸库和模型配置")
-            return
-        if status == "no_face":
-            messagebox.showwarning("未识别到人脸",
-                                   "没有识别到已登记的人脸，请正对摄像头、保持光线充足后重试。")
             self.parent.show_main_interface()
             return
         self.taker_name = result.get("name")

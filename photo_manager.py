@@ -109,12 +109,13 @@ def capture_item_auto(root, on_done):
         cap = None
 
     confirm_frames = max(1, int(config.AUTO_CAPTURE_CONFIRM_FRAMES))
-    timeout = float(config.AUTO_TIMEOUT_SEC)
+    timeout = float(config.AUTO_TIMEOUT_SEC)                    # 30 秒未识别到物品就返回
+    idle_timeout = float(getattr(config, "PREVIEW_IDLE_TIMEOUT_SEC", 30))  # 30 秒无触摸也返回
     started = time.time()
+    activity = {"last": time.time()}
 
     state = {"stop": False, "latest": None, "stable": 0, "last_label": None, "error": None}
     lock = threading.Lock()
-    preview = ui_preview.CameraPreview(root, "存入物品 · 请把物品放进取景框")
     finished = {"done": False}
 
     def worker():
@@ -153,11 +154,25 @@ def capture_item_auto(root, on_done):
         preview.close()
         on_done(result)
 
+    def cancel(_event=None):
+        finish({"status": "cancelled"})
+
+    def touch():
+        activity["last"] = time.time()
+
+    preview = ui_preview.CameraPreview(
+        root, "存入物品 · 请把物品放进取景框",
+        on_cancel=cancel, on_activity=touch,
+    )
+
     def tick():
         if finished["done"]:
             return
-        if timeout > 0 and time.time() - started > timeout:
-            finish({"status": "no_item"})
+        now = time.time()
+        left = min(timeout - (now - started) if timeout > 0 else 1e9,
+                   idle_timeout - (now - activity["last"]) if idle_timeout > 0 else 1e9)
+        if left <= 0:
+            finish({"status": "timeout"})
             return
 
         with lock:
@@ -168,14 +183,15 @@ def capture_item_auto(root, on_done):
             finish({"status": "camera_error", "detail": error})
             return
 
+        tail = " · %d 秒后自动返回" % int(left)
         if latest is None:
-            preview.update_frame(None, "正在打开摄像头…")
+            preview.update_frame(None, "正在打开摄像头…" + tail)
         if latest is not None:
             frame, items = latest
             best = items[0] if items else None
             if best is None:
                 state["stable"], state["last_label"] = 0, None
-                hint = "请把物品放进取景框 · ESC 取消"
+                hint = "请把物品放进取景框" + tail
             else:
                 if best["label"] == state["last_label"]:
                     state["stable"] += 1
@@ -192,9 +208,6 @@ def capture_item_auto(root, on_done):
                     return
 
         root.after(30, tick)
-
-    def cancel(_event=None):
-        finish({"status": "cancelled"})
 
     # ESC 交给主窗口的分发器，避免覆盖全局 ESC 绑定
     root.escape_handler = cancel

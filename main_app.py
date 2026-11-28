@@ -129,7 +129,22 @@ def _write_crash_log(exc_text):
         pass
 
 
+def _enable_dpi_awareness():
+    """Windows 高 DPI 下按物理像素渲染，避免全屏界面被系统放大后裁切。"""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
 def main():
+    _enable_dpi_awareness()
     try:
         print("[启动] 物品相机=%s 人脸相机=%s 后端=%s"
               % (config.CAMERA_INDEX, config.FACE_CAMERA_INDEX, config.CAMERA_BACKEND))

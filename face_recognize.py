@@ -26,8 +26,10 @@ class FaceRecognition:
 
     def run_recognition(self, root, on_done):
         """打开相机并循环请求服务端，识别到人后回调 on_done。"""
-        timeout = float(getattr(config, "FACE_TIMEOUT_SEC", 60))
+        timeout = float(getattr(config, "FACE_TIMEOUT_SEC", 30))          # 30 秒未识别人脸就返回
+        idle_timeout = float(getattr(config, "PREVIEW_IDLE_TIMEOUT_SEC", 30))  # 30 秒无触摸也返回
         started = time.time()
+        activity = {"last": time.time()}
         state = {
             "stop": False,
             "latest": None,      # frame_bgr
@@ -37,7 +39,6 @@ class FaceRecognition:
             "error_kind": None,
         }
         lock = threading.Lock()
-        preview = ui_preview.CameraPreview(root, "取物 · 请正对摄像头")
         finished = {"done": False}
 
         def worker():
@@ -96,8 +97,23 @@ class FaceRecognition:
             preview.close()
             on_done(result)
 
+        def cancel(_event=None):
+            finish({"status": "cancelled"})
+
+        def touch():
+            activity["last"] = time.time()
+
+        preview = ui_preview.CameraPreview(root, "取物 · 请正对摄像头",
+                                           on_cancel=cancel, on_activity=touch)
+
         def tick():
             if finished["done"]:
+                return
+            now = time.time()
+            left = min(timeout - (now - started) if timeout > 0 else 1e9,
+                       idle_timeout - (now - activity["last"]) if idle_timeout > 0 else 1e9)
+            if left <= 0:
+                finish({"status": "timeout"})
                 return
             with lock:
                 frame = state["latest"]
@@ -105,7 +121,7 @@ class FaceRecognition:
                 result = state["result"]
                 error = state["error"]
 
-            preview.update_frame(frame, status)
+            preview.update_frame(frame, "%s · %d 秒后自动返回" % (status, int(left)))
 
             if result:
                 finish({"status": "ok", "name": result})
@@ -118,14 +134,8 @@ class FaceRecognition:
                             "detail": "人脸识别服务器不可用，请检查服务器、人脸库和模型配置。\n%s"
                                       % error[:200]})
                 return
-            if timeout > 0 and time.time() - started > timeout:
-                finish({"status": "no_face"})
-                return
 
             root.after(100, tick)
-
-        def cancel(_event=None):
-            finish({"status": "cancelled"})
 
         root.escape_handler = cancel
         threading.Thread(target=worker, daemon=True).start()

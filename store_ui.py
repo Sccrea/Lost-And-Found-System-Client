@@ -65,17 +65,12 @@ class StoreUI:
     def _on_capture_done(self, result):
         status = result.get("status")
 
-        if status == "cancelled":
+        if status in ("cancelled", "timeout"):
+            # 触屏：点「取消」或 30 秒无操作/未识别，都直接回主界面，不弹框挡路
             self._back_to_main()
             return
 
         if status == "no_item":
-            messagebox.showwarning(
-                "未识别到物品",
-                "没有在画面中识别到可存放的物品。\n\n"
-                "支持：背包、手提包、行李箱、瓶子、杯子、手机、书本。\n"
-                "请将物品放正、靠近镜头后重试。",
-            )
             self._back_to_main()
             return
 

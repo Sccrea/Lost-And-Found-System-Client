@@ -31,9 +31,10 @@ DEFAULT_CONFIG = {
     "SCORE_THRESHOLD": 0.5,           # 置信度阈值
     "CAMERA_TEST_IMAGE": "",          # 无摄像头联调用：填图片路径，用该图模拟镜头
     "AUTO_CAPTURE_CONFIRM_FRAMES": 2, # 连续 N 帧识别到同一类才抓拍（防单帧误检）
-    "AUTO_TIMEOUT_SEC": 120,          # 等待物品出现的超时（秒），0 表示一直等
+    "AUTO_TIMEOUT_SEC": 30,           # 摄像头 30 秒未识别到物品就返回主界面
     "CROP_PADDING_RATIO": 0.08,       # 裁剪时四周外扩比例，避免切边
-    "FACE_TIMEOUT_SEC": 60            # 取物时等待人脸的超时（秒）
+    "FACE_TIMEOUT_SEC": 30,           # 摄像头 30 秒未识别到人脸就返回主界面
+    "PREVIEW_IDLE_TIMEOUT_SEC": 30    # 预览界面 30 秒无触摸操作就返回主界面
 }
 
 def ensure_config():
@@ -75,6 +76,7 @@ CAMERA_TEST_IMAGE = _config.get("CAMERA_TEST_IMAGE", "") or ""
 if CAMERA_TEST_IMAGE and not os.path.isabs(CAMERA_TEST_IMAGE):
     CAMERA_TEST_IMAGE = os.path.join(BASE_DIR, CAMERA_TEST_IMAGE)
 AUTO_CAPTURE_CONFIRM_FRAMES = int(_config.get("AUTO_CAPTURE_CONFIRM_FRAMES", 2))
-AUTO_TIMEOUT_SEC = float(_config.get("AUTO_TIMEOUT_SEC", 120))
+AUTO_TIMEOUT_SEC = float(_config.get("AUTO_TIMEOUT_SEC", 30))
 CROP_PADDING_RATIO = float(_config.get("CROP_PADDING_RATIO", 0.08))
-FACE_TIMEOUT_SEC = float(_config.get("FACE_TIMEOUT_SEC", 60))
+FACE_TIMEOUT_SEC = float(_config.get("FACE_TIMEOUT_SEC", 30))
+PREVIEW_IDLE_TIMEOUT_SEC = float(_config.get("PREVIEW_IDLE_TIMEOUT_SEC", 30))

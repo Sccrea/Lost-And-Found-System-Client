@@ -2,8 +2,10 @@
 """把摄像头画面嵌进 Tk 主窗口（替代 cv2.imshow 独立窗口）。
 
 之前用 cv2.imshow 会弹出一个独立窗口：不居中、点主程序还会把它顶到后面。
-这里改成在主窗口内铺满一层预览层（Canvas 居中绘制），ESC 取消，
-退出时销毁该层恢复原界面。
+这里改成在主窗口内铺满一层预览层（Canvas 居中绘制）。
+
+触屏场景：左上角有 192×92 的「取消」按钮（和主界面退出按钮同样大小），
+任何一次触摸都会回调 on_activity，用于重置「无操作自动返回」计时。
 """
 
 import tkinter as tk
@@ -28,9 +30,9 @@ def bgr_to_photo(bgr, max_w, max_h):
 
 
 class CameraPreview:
-    """主窗口内的全屏预览层（Canvas 居中显示画面 + 底部提示）。"""
+    """主窗口内的全屏预览层（Canvas 居中显示画面 + 底部提示 + 左上角取消）。"""
 
-    def __init__(self, root, title=""):
+    def __init__(self, root, title="", on_cancel=None, on_activity=None):
         self.root = root
         self.container = tk.Frame(root, bg='#101010')
         self.container.pack(expand=True, fill='both')
@@ -44,6 +46,25 @@ class CameraPreview:
 
         self._photo = None
         self._hint = ""
+        self.on_activity = on_activity
+
+        if on_cancel is not None:
+            # 触屏没有 ESC，必须给一个够大的取消按钮
+            self.cancel_button = tk.Button(
+                self.container, text="取消", bg='#9E9E9E', fg='white',
+                font=('微软雅黑', 20, 'bold'), bd=0,
+                activebackground='#757575', activeforeground='white',
+                command=on_cancel,
+            )
+            self.cancel_button.place(x=12, y=12, width=192, height=92)
+            self.cancel_button.lift()
+
+        for widget in (self.container, self.canvas):
+            widget.bind('<Button-1>', self._touch)
+
+    def _touch(self, _event=None):
+        if self.on_activity:
+            self.on_activity()
 
     def _size(self):
         w = self.canvas.winfo_width()
