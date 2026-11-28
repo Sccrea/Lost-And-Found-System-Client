@@ -229,3 +229,6 @@ models/*.pt
 
 # Runtime data
 files/
+
+# 中文字体资源（SIL OFL，见 README）
+assets/*.otf

@@ -4,21 +4,24 @@ import time
 
 import cv2
 
+import camera_source
+import config
 import network_manager
 
 
 class FaceRecognition:
     """Capture camera frames locally and ask the configured server to identify them."""
 
-    def __init__(self, camera_index=0, request_interval=0.5):
-        self.camera_index = camera_index
+    def __init__(self, camera_index=None, request_interval=0.5):
+        # 默认用配置里指定的人脸摄像头（树莓派上通常是 1 号相机）
+        self.camera_index = config.FACE_CAMERA_INDEX if camera_index is None else camera_index
         self.request_interval = request_interval
 
     def run_recognition(self):
         """Return the recognized user's name, or ``None`` when cancelled/unavailable."""
-        cap = cv2.VideoCapture(self.camera_index)
-        if not cap.isOpened():
-            print("[错误] 无法打开摄像头")
+        cap = camera_source.open_camera(self.camera_index, backend=config.CAMERA_BACKEND)
+        if cap is None:
+            print("[错误] 无法打开摄像头（人脸相机 %s）" % self.camera_index)
             return None
 
         recognized_name = None

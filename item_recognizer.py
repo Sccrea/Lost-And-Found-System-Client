@@ -81,33 +81,35 @@ def resolve_model_path():
 
 # ---------------------------------------------------------------- 摄像头
 def open_camera(index=0, width=640, height=480):
-    """打开摄像头，按平台选择后端；打不开返回 None。"""
-    if sys.platform == "win32":
-        backends = [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]
-    elif sys.platform == "darwin":
-        backends = [cv2.CAP_AVFOUNDATION, cv2.CAP_ANY]
-    else:
-        backends = [cv2.CAP_V4L2, cv2.CAP_ANY]
+    """打开摄像头；优先 Picamera2（树莓派 CSI），失败退化 OpenCV。
 
-    for backend in backends:
-        cap = cv2.VideoCapture(index, backend)
-        if not cap.isOpened():
-            cap.release()
-            continue
-        # MJPG 能显著降低 USB2 带宽占用；失败也不要紧
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        return cap
-    return None
+    具体后端选择与配置见 camera_source.open_camera。
+    """
+    import camera_source
+
+    backend = "auto"
+    try:
+        import config
+        backend = getattr(config, "CAMERA_BACKEND", "auto")
+    except Exception:
+        pass
+    return camera_source.open_camera(index, width, height, backend=backend)
 
 
 # ---------------------------------------------------------------- 绘制
 _FONT_CANDIDATES = [
+    # 随程序分发的中文字体（SIL OFL，树莓派上没有中文字体时兜底）
+    os.path.join(app_base_dir(), "assets", "NotoSansSC-Regular.otf"),
+    os.path.join(bundled_dir(), "assets", "NotoSansSC-Regular.otf"),
+    # Windows
     os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", "msyh.ttc"),
     os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", "simhei.ttf"),
+    # Linux
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 ]
 
 

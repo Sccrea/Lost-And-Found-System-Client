@@ -25,7 +25,9 @@ DEFAULT_CONFIG = {
     "ENABLE_LOCK": True,
     # ---- 物品识别 / 自动存物 ----
     "ENABLE_RECOGNITION": True,       # 关闭后无法自动识别（存物流程会提示）
-    "CAMERA_INDEX": 0,                # 摄像头序号，多摄像头时改这里
+    "CAMERA_INDEX": 0,                # 物品识别摄像头（树莓派 5：0 = 广角 CM3）
+    "FACE_CAMERA_INDEX": 1,           # 人脸识别摄像头（树莓派 5：1 = NoIR CM3）
+    "CAMERA_BACKEND": "auto",         # auto / picamera2 / opencv
     "SCORE_THRESHOLD": 0.5,           # 置信度阈值
     "CAMERA_TEST_IMAGE": "",          # 无摄像头联调用：填图片路径，用该图模拟镜头
     "AUTO_CAPTURE_CONFIRM_FRAMES": 2, # 连续 N 帧识别到同一类才抓拍（防单帧误检）
@@ -65,6 +67,8 @@ if SERVER_CERT_PATH and not os.path.isabs(SERVER_CERT_PATH):
 ENABLE_LOCK = _config.get("ENABLE_LOCK", DEFAULT_CONFIG["ENABLE_LOCK"])
 ENABLE_RECOGNITION = bool(_config.get("ENABLE_RECOGNITION", True))
 CAMERA_INDEX = int(_config.get("CAMERA_INDEX", 0))
+FACE_CAMERA_INDEX = int(_config.get("FACE_CAMERA_INDEX", 1))
+CAMERA_BACKEND = str(_config.get("CAMERA_BACKEND", "auto") or "auto")
 SCORE_THRESHOLD = float(_config.get("SCORE_THRESHOLD", 0.5))
 CAMERA_TEST_IMAGE = _config.get("CAMERA_TEST_IMAGE", "") or ""
 if CAMERA_TEST_IMAGE and not os.path.isabs(CAMERA_TEST_IMAGE):

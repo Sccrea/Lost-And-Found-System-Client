@@ -26,6 +26,9 @@ class LostAndFoundApp:
 
         # ---------- 设置全屏 ----------
         self.root.attributes('-fullscreen', True)
+        # labwc/XWayland 下全屏请求偶尔在窗口 map 之前被丢弃，延迟再确认两次
+        self.root.after(200, self._ensure_fullscreen)
+        self.root.after(1500, self._ensure_fullscreen)
         # 绑定 ESC 键退出全屏（按 ESC 可切换回窗口模式，不退出程序）
         self.root.bind('<Escape>', self._quit_app)
 
@@ -36,6 +39,14 @@ class LostAndFoundApp:
         # 显示主界面
         self.show_main_interface()
         self._register_terminal()
+
+    def _ensure_fullscreen(self):
+        """窗口管理器丢掉全屏请求时重试一次。"""
+        try:
+            if not self.root.attributes('-fullscreen'):
+                self.root.attributes('-fullscreen', True)
+        except Exception:
+            pass
 
     def _register_terminal(self):
         try:
@@ -109,6 +120,14 @@ def _write_crash_log(exc_text):
 
 def main():
     try:
+        print("[启动] 物品相机=%s 人脸相机=%s 后端=%s"
+              % (config.CAMERA_INDEX, config.FACE_CAMERA_INDEX, config.CAMERA_BACKEND))
+        try:
+            import camera_source
+            print(camera_source.describe_environment())
+        except Exception as exc:
+            print("[启动] 相机环境检查失败:", exc)
+
         root = tk.Tk()
         app = LostAndFoundApp(root)
         # 后台预热识别模型，避免第一次拍照卡顿
