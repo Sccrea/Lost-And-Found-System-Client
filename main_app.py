@@ -30,7 +30,7 @@ class LostAndFoundApp:
         self.root.after(200, self._ensure_fullscreen)
         self.root.after(1500, self._ensure_fullscreen)
         # 绑定 ESC 键退出全屏（按 ESC 可切换回窗口模式，不退出程序）
-        self.root.bind('<Escape>', self._quit_app)
+        self.root.bind('<Escape>', self._on_escape)
 
         # 初始化UI子模块
         self.store_ui = StoreUI(self)
@@ -100,6 +100,17 @@ class LostAndFoundApp:
     def _clear_window(self):
         for widget in self.root.winfo_children():
             widget.destroy()
+
+    def _on_escape(self, event=None):
+        """ESC：预览中用于取消预览，否则走退出确认。"""
+        handler = getattr(self.root, "escape_handler", None)
+        if handler is not None:
+            try:
+                handler()
+            except Exception:
+                pass
+            return
+        self._quit_app()
 
     def _quit_app(self, event=None):
         """退出应用程序"""

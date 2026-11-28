@@ -22,13 +22,27 @@ class TakeUI:
 
     def show(self):
         """第一步：人脸识别取物人"""
+        self._clear_window()   # 先清掉主界面，预览层独占窗口
         fr = FaceRecognition()
-        try:
-            self.taker_name = fr.run_recognition()
-        except requests.exceptions.RequestException:
-            messagebox.showerror("识别失败", "人脸识别服务器不可用，请检查服务器、人脸库和模型配置")
+        # 预览渲染在主窗口内，识别完成/取消后走回调
+        fr.run_recognition(self.root, self._on_face_done)
+
+    def _on_face_done(self, result):
+        status = result.get("status")
+        if status == "cancelled":
+            self.parent.show_main_interface()
             return
-        if self.taker_name is not None:
+        if status == "error":
+            messagebox.showerror("识别失败",
+                                 result.get("detail") or "人脸识别服务器不可用，请检查服务器、人脸库和模型配置")
+            return
+        if status == "no_face":
+            messagebox.showwarning("未识别到人脸",
+                                   "没有识别到已登记的人脸，请正对摄像头、保持光线充足后重试。")
+            self.parent.show_main_interface()
+            return
+        self.taker_name = result.get("name")
+        if self.taker_name:
             self._show_locker_selection()
 
     def _show_locker_selection(self):

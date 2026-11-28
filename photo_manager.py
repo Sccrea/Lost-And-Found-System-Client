@@ -1,31 +1,31 @@
 # -*- coding: utf-8 -*-
 """全自动存物拍照：打开摄像头 → 实时识别 → 识别到物品立刻裁剪保存。
 
-流程（无需用户操作）：
-    capture_item_auto()
-      ├─ 打开摄像头，逐帧推理
-      ├─ 连续 N 帧识别到同一类物品（N = AUTO_CAPTURE_CONFIRM_FRAMES）
-      ├─ 按检测框裁剪（外扩 CROP_PADDING_RATIO），保存到 files/temp/item.jpg
-      └─ 返回识别结果，交给 store_ui 继续「上传 → 开锁」
+预览画面直接渲染在 Tk 主窗口内（不再弹 cv2 独立窗口），因此始终居中、
+也不会被主窗口顶掉。ESC 可取消。
 
-返回值统一为 dict：
-    {'status': 'ok',        'item': {...}, 'path': '...'}
-    {'status': 'cancelled'}                    用户按 ESC
-    {'status': 'no_item'}                      超时未识别到物品
-    {'status': 'camera_error', 'detail': '...'} 摄像头打不开
+异步接口：
+    capture_item_auto(root, on_done)      # 不阻塞 Tk 主循环
+    on_done(result) 收到 dict：
+        {'status': 'ok',        'item': {...}, 'path': '...'}
+        {'status': 'cancelled'}                     用户按 ESC
+        {'status': 'no_item'}                       超时未识别到物品
+        {'status': 'camera_error', 'detail': '...'} 摄像头打不开
+
+实现：读帧 + 推理放在工作线程，Tk 主线程只负责渲染与状态判定，界面不卡。
 """
 
 import os
+import threading
 import time
 
 import cv2
 from PIL import Image, ImageTk
-import tkinter.messagebox as messagebox
 
 import config
 import item_recognizer
+import ui_preview
 
-WINDOW_NAME = "Store Item - auto capture   (ESC: cancel)"
 TEMP_PHOTO_NAME = "item.jpg"
 PREVIEW_MAX = (400, 300)
 
@@ -83,9 +83,8 @@ class _StillImageSource:
         pass
 
 
-def capture_item_auto():
-    """打开摄像头并自动抓拍物品。返回见模块文档。"""
-    # 清掉上一次的裁剪图，避免误传旧图
+def capture_item_auto(root, on_done):
+    """打开摄像头并自动抓拍物品，完成后回调 on_done(result)。"""
     stale = temp_photo_path()
     if os.path.exists(stale):
         try:
@@ -95,105 +94,112 @@ def capture_item_auto():
 
     recognizer = _recognizer()
     if recognizer is None:
-        return {"status": "camera_error",
-                "detail": "未加载物品识别模型，无法自动识别。\n请检查 models/yolo11n.onnx。"}
+        on_done({"status": "camera_error",
+                 "detail": "未加载物品识别模型，无法自动识别。\n请检查 models/yolo11n.onnx。"})
+        return
 
-    # 自检模式与真实摄像头走同一套循环，只是画面来源不同
     if config.CAMERA_TEST_IMAGE:
         cap = _StillImageSource(config.CAMERA_TEST_IMAGE)
         if cap.frame is None:
-            return {"status": "camera_error",
-                    "detail": "无法读取测试图片：\n%s" % config.CAMERA_TEST_IMAGE}
+            on_done({"status": "camera_error",
+                     "detail": "无法读取测试图片：\n%s" % config.CAMERA_TEST_IMAGE})
+            return
     else:
-        cap = item_recognizer.open_camera(config.CAMERA_INDEX)
-        if cap is None:
-            return {"status": "camera_error",
-                    "detail": "无法打开摄像头（序号 %s）。\n请检查摄像头连接，"
-                              "或在 files/config.json 中调整 CAMERA_INDEX。" % config.CAMERA_INDEX}
+        # 真机相机交给采集线程自己打开（见 worker），避免跨线程 capture 取不到帧
+        cap = None
 
     confirm_frames = max(1, int(config.AUTO_CAPTURE_CONFIRM_FRAMES))
     timeout = float(config.AUTO_TIMEOUT_SEC)
     started = time.time()
 
-    status = "no_item"
-    detail = None
-    item = None
-    path = None
-    stable = 0
-    last_label = None
-    read_fails = 0
+    state = {"stop": False, "latest": None, "stable": 0, "last_label": None, "error": None}
+    lock = threading.Lock()
+    preview = ui_preview.CameraPreview(root, "存入物品 · 请把物品放进取景框")
+    finished = {"done": False}
 
-    try:
-        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(WINDOW_NAME, 960, 720)
-    except cv2.error:
-        pass
+    def worker():
+        # 相机在采集线程内打开/启动：picamera2 跨线程 capture 会取不到新帧
+        local_cap = cap
+        try:
+            if local_cap is None:
+                local_cap = item_recognizer.open_camera(config.CAMERA_INDEX)
+                if local_cap is None:
+                    with lock:
+                        state["error"] = "无法打开摄像头（序号 %s）。\n请检查摄像头连接，" \
+                                         "或在 files/config.json 中调整 CAMERA_INDEX。" % config.CAMERA_INDEX
+                    return
+            while not state["stop"]:
+                ok, frame = local_cap.read()
+                if not ok or frame is None:
+                    time.sleep(0.03)
+                    continue
+                items = recognizer.recognize(frame)
+                with lock:
+                    state["latest"] = (frame, items)
+        except Exception as exc:      # 相机被占用等
+            with lock:
+                state["error"] = "%s: %s" % (type(exc).__name__, exc)
+        finally:
+            if local_cap is not None:
+                local_cap.release()
 
-    try:
-        while True:
-            ok, frame = cap.read()
-            if not ok or frame is None:
-                # 有些后端（如 Windows MSMF）会"打开成功但读不到帧"，不能死等
-                read_fails += 1
-                if read_fails > 60:
-                    status = "camera_error"
-                    detail = ("摄像头已打开但读不到画面（序号 %s）。\n"
-                              "请检查摄像头是否被其他程序占用，"
-                              "或在 files/config.json 中调整 CAMERA_INDEX。" % config.CAMERA_INDEX)
-                    break
-                time.sleep(0.03)
-                continue
-            read_fails = 0
+    def finish(result):
+        if finished["done"]:
+            return
+        finished["done"] = True
+        state["stop"] = True
+        if getattr(root, "escape_handler", None) is not None:
+            root.escape_handler = None
+        preview.close()
+        on_done(result)
 
-            items = recognizer.recognize(frame)
+    def tick():
+        if finished["done"]:
+            return
+        if timeout > 0 and time.time() - started > timeout:
+            finish({"status": "no_item"})
+            return
+
+        with lock:
+            latest = state["latest"]
+            error = state["error"]
+
+        if error:
+            finish({"status": "camera_error", "detail": error})
+            return
+
+        if latest is None:
+            preview.update_frame(None, "正在打开摄像头…")
+        if latest is not None:
+            frame, items = latest
             best = items[0] if items else None
-
             if best is None:
-                stable, last_label = 0, None
+                state["stable"], state["last_label"] = 0, None
                 hint = "请把物品放进取景框 · ESC 取消"
             else:
-                # 连续同一类才算稳定，避免单帧误检直接开柜
-                if best["label"] == last_label:
-                    stable += 1
+                if best["label"] == state["last_label"]:
+                    state["stable"] += 1
                 else:
-                    stable, last_label = 1, best["label"]
-                hint = "识别到 %s %.0f%% · 正在存放…" % (
-                    best["label_cn"], best["score"] * 100)
+                    state["stable"], state["last_label"] = 1, best["label"]
+                hint = "识别到 %s %.0f%% · 正在存放…" % (best["label_cn"], best["score"] * 100)
 
-            cv2.imshow(WINDOW_NAME, item_recognizer.draw_items(frame, items, hint))
-            key = cv2.waitKey(1) & 0xFF
+            preview.update_frame(item_recognizer.draw_items(frame, items, None), hint)
 
-            if key in (27, ord("q")):
-                status = "cancelled"
-                break
-
-            if best is not None and stable >= confirm_frames:
+            if best is not None and state["stable"] >= confirm_frames:
                 saved, size = _save_crop(frame, best["box"])
                 if saved:
-                    status = "ok"
-                    item = dict(best, crop_size=size)
-                    path = saved
-                    break
+                    finish({"status": "ok", "item": dict(best, crop_size=size), "path": saved})
+                    return
 
-            if timeout > 0 and time.time() - started > timeout:
-                status = "no_item"
-                break
+        root.after(30, tick)
 
-            if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
-                status = "cancelled"
-                break
-    finally:
-        cap.release()
-        try:
-            cv2.destroyWindow(WINDOW_NAME)
-        except cv2.error:
-            pass
-        cv2.waitKey(1)
+    def cancel(_event=None):
+        finish({"status": "cancelled"})
 
-    result = {"status": status, "item": item, "path": path}
-    if detail:
-        result["detail"] = detail
-    return result
+    # ESC 交给主窗口的分发器，避免覆盖全局 ESC 绑定
+    root.escape_handler = cancel
+    threading.Thread(target=worker, daemon=True).start()
+    root.after(30, tick)
 
 
 def show_photo_preview(photo_label, photo_path):

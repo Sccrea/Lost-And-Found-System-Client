@@ -31,8 +31,12 @@ class StoreUI:
         """点击「存物品」后立即打开摄像头开始识别。"""
         self._clear_window()
         self._show_progress("正在打开摄像头…", "请把物品朝向镜头")
-        # 先让界面画出来，再进入阻塞的摄像头循环
-        self.root.after(60, self._run_auto_flow)
+        # 先让状态页画出来，再清空窗口启动（非阻塞的）内嵌预览
+        self.root.after(120, self._start_preview)
+
+    def _start_preview(self):
+        self._clear_window()
+        photo_manager.capture_item_auto(self.root, self._on_capture_done)
 
     # ------------------------------------------------------------ 界面
     def _clear_window(self):
@@ -58,9 +62,7 @@ class StoreUI:
             self.parent.show_main_interface()
 
     # ------------------------------------------------------------ 主流程
-    def _run_auto_flow(self):
-        # 1) 打开摄像头 + 识别 + 裁剪保存
-        result = photo_manager.capture_item_auto()
+    def _on_capture_done(self, result):
         status = result.get("status")
 
         if status == "cancelled":
