@@ -67,6 +67,25 @@ def get_photo_url(photo_name):
     """获取照片的完整URL"""
     return f"{SERVER_URL}/images/{photo_name}"
 
+def heartbeat():
+    """上报心跳，返回服务端下发的待执行指令。"""
+    payload = {
+        'terminal_id': config.TERMINAL_ID,
+        'location': config.LOCATION,
+    }
+    resp = requests.post(f"{SERVER_URL}/api/heartbeat", json=payload, timeout=5,
+                         verify=request_verify())
+    resp.raise_for_status()
+    return resp.json()
+
+def report_command(command_id, ok, message=''):
+    """回报远程指令的执行结果。"""
+    payload = {'id': command_id, 'ok': bool(ok), 'message': message}
+    resp = requests.post(f"{SERVER_URL}/api/command-result", json=payload, timeout=5,
+                         verify=request_verify())
+    resp.raise_for_status()
+    return resp.json()
+
 def register_terminal():
     url = f"{SERVER_URL}/api/register"
     payload = {

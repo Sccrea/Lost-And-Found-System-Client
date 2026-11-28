@@ -9,6 +9,7 @@ from tkinter import ttk, messagebox
 from store_ui import StoreUI
 from take_ui import TakeUI
 import config
+import heartbeat
 import item_recognizer
 import network_manager
 import requests
@@ -156,6 +157,12 @@ def main():
 
         root = tk.Tk()
         app = LostAndFoundApp(root)
+        # 后台心跳：上报在线状态并执行网页端下发的开柜指令
+        try:
+            heartbeat.start()
+        except Exception as exc:
+            print("[启动] 心跳线程启动失败:", exc)
+
         # 后台预热识别模型，避免第一次拍照卡顿
         if config.ENABLE_RECOGNITION:
             threading.Thread(target=item_recognizer.get_recognizer, daemon=True).start()

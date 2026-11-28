@@ -34,7 +34,8 @@ DEFAULT_CONFIG = {
     "AUTO_TIMEOUT_SEC": 30,           # 摄像头 30 秒未识别到物品就返回主界面
     "CROP_PADDING_RATIO": 0.08,       # 裁剪时四周外扩比例，避免切边
     "FACE_TIMEOUT_SEC": 30,           # 摄像头 30 秒未识别到人脸就返回主界面
-    "PREVIEW_IDLE_TIMEOUT_SEC": 30    # 预览界面 30 秒无触摸操作就返回主界面
+    "PREVIEW_IDLE_TIMEOUT_SEC": 30,   # 预览界面 30 秒无触摸操作就返回主界面
+    "HEARTBEAT_SEC": 10             # 心跳间隔（秒），服务端据此判断在线
 }
 
 def ensure_config():
@@ -80,3 +81,4 @@ AUTO_TIMEOUT_SEC = float(_config.get("AUTO_TIMEOUT_SEC", 30))
 CROP_PADDING_RATIO = float(_config.get("CROP_PADDING_RATIO", 0.08))
 FACE_TIMEOUT_SEC = float(_config.get("FACE_TIMEOUT_SEC", 30))
 PREVIEW_IDLE_TIMEOUT_SEC = float(_config.get("PREVIEW_IDLE_TIMEOUT_SEC", 30))
+HEARTBEAT_SEC = float(_config.get("HEARTBEAT_SEC", 10))
