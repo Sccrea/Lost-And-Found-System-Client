@@ -101,14 +101,15 @@ class TakeUI:
             label = "%d 号柜（%s）" % (lid, "有物品" if status == 1 else "空闲")
             self.locker_options.append((label, lid))
 
-        self.locker_var = tk.StringVar()
-        self.locker_combo = ttk.Combobox(
-            right, textvariable=self.locker_var, state='readonly',
-            values=[label for label, _ in self.locker_options],
-            font=('微软雅黑', 18), width=18, height=8,
+        # 用大按钮代替下拉框：点开是整屏大按钮面板，触屏点得中
+        self.locker_var = tk.StringVar(value="请选择柜子")
+        self.locker_button = tk.Button(
+            right, textvariable=self.locker_var, font=('微软雅黑', 20, 'bold'),
+            bg='#ffffff', fg='#1f2937', activebackground='#e2e8f0',
+            relief='ridge', bd=2, height=2, anchor='w', padx=12,
+            command=self._open_locker_picker,
         )
-        self.locker_combo.pack(fill='x', ipady=8)
-        self.locker_combo.bind('<<ComboboxSelected>>', self._on_locker_chosen)
+        self.locker_button.pack(fill='x')
 
         # 物品信息
         self.info_frame = tk.Frame(right, bg='#f0f0f0')
@@ -127,22 +128,20 @@ class TakeUI:
                 default_index = index
                 break
         if default_index is None:
+            self.locker_var.set("当前没有可取的物品")
             self._show_empty_info()
         else:
-            self.locker_combo.current(default_index)
-            self._on_locker_chosen()
+            self._select_locker_index(default_index)
 
     # ------------------------------------------------------------ 下拉框事件
     def _selected_locker_id(self):
-        index = self.locker_combo.current()
-        if 0 <= index < len(self.locker_options):
-            return self.locker_options[index][1]
-        return None
+        return self.selected_locker_id
 
-    def _on_locker_chosen(self, event=None):
-        locker_id = self._selected_locker_id()
-        if locker_id is None:
+    def _select_locker_index(self, index):
+        if not (0 <= index < len(self.locker_options)):
             return
+        label, locker_id = self.locker_options[index]
+        self.locker_var.set(label + "  ▾")
         self.selected_locker_id = locker_id
         item = self.lockers_data.get(locker_id) or {}
         if item.get('status') == 1:
@@ -151,6 +150,58 @@ class TakeUI:
         else:
             self.take_btn.config(state='disabled')
             self._show_empty_info(locker_id)
+
+    def _on_locker_chosen(self, event=None):
+        self._select_locker_index(0 if self.selected_locker_id is None else
+                                  [lid for _, lid in self.locker_options].index(self.selected_locker_id))
+
+    # ------------------------------------------------------------ 柜子选择面板
+    def _open_locker_picker(self):
+        """整屏面板：8 个大按钮，2 列 4 行，单手可点。"""
+        self.picker = tk.Frame(self.root, bg='#0b1220')
+        self.picker.place(x=0, y=0, relwidth=1, relheight=1)
+        self.picker.lift()
+
+        card = tk.Frame(self.picker, bg='#ffffff')
+        card.place(relx=0.5, rely=0.5, anchor='center', width=760)
+
+        tk.Label(card, text="选择柜子", bg='#ffffff', fg='#4a90e2',
+                 font=('微软雅黑', 26, 'bold')).pack(pady=(22, 6))
+        tk.Label(card, text="绿色 = 有物品   灰色 = 空闲", bg='#ffffff',
+                 fg='#64748b', font=('微软雅黑', 14)).pack(pady=(0, 14))
+
+        grid = tk.Frame(card, bg='#ffffff')
+        grid.pack(padx=20, pady=(0, 16))
+
+        for index, (label, locker_id) in enumerate(self.locker_options):
+            status = self.lockers_data.get(locker_id, {}).get('status', 0)
+            bg = '#4CAF50' if status == 1 else '#9E9E9E'
+            btn = tk.Button(
+                grid, text="%d 号柜\n%s" % (locker_id, "有物品" if status == 1 else "空闲"),
+                bg=bg, fg='white', font=('微软雅黑', 22, 'bold'),
+                width=8, height=3, bd=0,
+                activebackground=('#43a047' if status == 1 else '#8d8d8d'),
+                activeforeground='white',
+                command=lambda i=index: self._pick_locker(i),
+            )
+            btn.grid(row=index // 4, column=index % 4, padx=8, pady=8)
+
+        tk.Button(card, text="关闭", bg='#e2e8f0', fg='#334155',
+                  font=('微软雅黑', 18, 'bold'), width=10, height=1,
+                  bd=0, command=self._close_locker_picker).pack(pady=(0, 20))
+
+    def _pick_locker(self, index):
+        self._close_locker_picker()
+        self._select_locker_index(index)
+
+    def _close_locker_picker(self):
+        picker = getattr(self, 'picker', None)
+        if picker is not None:
+            try:
+                picker.destroy()
+            except tk.TclError:
+                pass
+            self.picker = None
 
     def _on_take_clicked(self):
         locker_id = self.selected_locker_id
