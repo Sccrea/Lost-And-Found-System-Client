@@ -17,6 +17,7 @@ import item_recognizer
 import network_manager
 import open_lock
 import photo_manager
+import ui_dialog
 
 
 class StoreUI:
@@ -29,6 +30,7 @@ class StoreUI:
     # ------------------------------------------------------------ 入口
     def show(self):
         """点击「存物品」后立即打开摄像头开始识别。"""
+        self.parent.current_view = "store"
         self._clear_window()
         self._show_progress("正在打开摄像头…", "请把物品朝向镜头")
         # 先让状态页画出来，再清空窗口启动（非阻塞的）内嵌预览
@@ -75,8 +77,7 @@ class StoreUI:
             return
 
         if status == "camera_error":
-            messagebox.showerror("摄像头异常", result.get("detail", "无法打开摄像头"))
-            self._back_to_main()
+            self._alert("摄像头异常", result.get("detail", "无法打开摄像头"))
             return
 
         item = result["item"]
@@ -89,8 +90,7 @@ class StoreUI:
         try:
             lockers = network_manager.get_lockers_status()
         except requests.exceptions.RequestException:
-            messagebox.showerror("网络错误", "无法连接至服务器，请检查网络连接")
-            self._back_to_main()
+            self._alert("网络错误", "无法连接至服务器，请检查网络连接")
             return
 
         free_lock = None
@@ -99,8 +99,7 @@ class StoreUI:
                 free_lock = lid
                 break
         if free_lock is None:
-            messagebox.showerror("无空闲柜子", "当前没有空闲柜子，请稍后再试。")
-            self._back_to_main()
+            self._alert("无空闲柜子", "当前没有空闲柜子，请稍后再试。")
             return
 
         # 3) 上传裁剪后的物品图 + 识别结果
@@ -110,12 +109,10 @@ class StoreUI:
                 category=category, confidence=confidence,
             )
         except requests.exceptions.RequestException:
-            messagebox.showerror("网络错误", "无法连接至服务器，物品未存入，请检查网络连接")
-            self._back_to_main()
+            self._alert("网络错误", "无法连接至服务器，物品未存入，请检查网络连接")
             return
         except Exception as exc:
-            messagebox.showerror("存物失败", "上传物品信息失败：%s" % exc)
-            self._back_to_main()
+            self._alert("存物失败", "上传物品信息失败：%s" % exc)
             return
 
         # 4) 直接开锁（不做二次确认）
@@ -127,15 +124,20 @@ class StoreUI:
 
         # 5) 返回结果
         if lock_error is not None:
-            messagebox.showerror(
-                "开锁失败",
-                "物品已登记到 %s 号柜，但柜门未能打开：%s\n\n"
-                "请联系管理员处理（检查电锁与串口配置）。" % (free_lock, lock_error),
-            )
+            self._alert("开锁失败",
+                        "物品已登记到 %s 号柜，但柜门未能打开：%s\n\n"
+                        "请联系管理员处理（检查电锁与串口配置）。" % (free_lock, lock_error))
         else:
-            messagebox.showinfo(
-                "开锁成功",
-                "%s 号柜已打开\n\n物品：%s（置信度 %.0f%%）\n"
-                "请将物品放入柜中并关好柜门。" % (free_lock, category, confidence * 100),
+            ui_dialog.show(
+                self.root, "开锁成功",
+                "%s 号柜已打开\n\n物品：%s（置信度 %.0f%%）\n请将物品放入柜中并关好柜门。"
+                % (free_lock, category, confidence * 100),
+                [("知道了", True)], kind="ok",
+                on_close=lambda _v: self._back_to_main(),
             )
-        self._back_to_main()
+
+    # ------------------------------------------------------------ 内嵌提示框
+    def _alert(self, title, message, kind="error"):
+        """内嵌错误提示：点「确定」或 30 秒后回到主界面。"""
+        ui_dialog.show(self.root, title, message, [("确定", True)], kind=kind,
+                       on_close=lambda _v: self._back_to_main())

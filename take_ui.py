@@ -8,6 +8,7 @@ import open_lock
 import config
 import network_manager
 import photo_manager
+import ui_dialog
 from face_recognize import FaceRecognition
 
 class TakeUI:
@@ -22,6 +23,7 @@ class TakeUI:
 
     def show(self):
         """第一步：人脸识别取物人"""
+        self.parent.current_view = "take"
         self._clear_window()   # 先清掉主界面，预览层独占窗口
         fr = FaceRecognition()
         # 预览渲染在主窗口内，识别完成/取消后走回调
@@ -34,9 +36,10 @@ class TakeUI:
             self.parent.show_main_interface()
             return
         if status == "error":
-            messagebox.showerror("识别失败",
-                                 result.get("detail") or "人脸识别服务器不可用，请检查服务器、人脸库和模型配置")
-            self.parent.show_main_interface()
+            ui_dialog.show(self.root, "识别失败",
+                           result.get("detail") or "人脸识别服务器不可用，请检查服务器、人脸库和模型配置",
+                           [("确定", True)], kind="error",
+                           on_close=lambda _v: self.parent.show_main_interface())
             return
         self.taker_name = result.get("name")
         if self.taker_name:
@@ -60,7 +63,7 @@ class TakeUI:
         scrollbar.pack(side="right", fill="y")
 
         # 返回按钮
-        back_btn = tk.Button(scrollable, text="返回", bg='#CCCCCC', font=('微软雅黑',10), width=8,
+        back_btn = tk.Button(scrollable, text="返回", bg='#CCCCCC', font=('微软雅黑',14,'bold'), width=10,
                              command=self.parent.show_main_interface)
         back_btn.grid(row=0, column=0, sticky='nw', pady=(0,0))
 
@@ -70,15 +73,18 @@ class TakeUI:
         tk.Label(top_frame, text="选择要取物的柜子", bg='#f0f0f0', font=('微软雅黑',16,'bold')).pack(side=tk.LEFT, padx=(40,10))
         legend_frame = tk.Frame(top_frame, bg='#f0f0f0')
         legend_frame.pack(side=tk.LEFT)
-        tk.Label(legend_frame, text="有物品", bg='#4CAF50', fg='white', width=8).pack(side=tk.LEFT, padx=5)
-        tk.Label(legend_frame, text="无物品", bg='#9E9E9E', fg='white', width=8).pack(side=tk.LEFT, padx=5)
+        tk.Label(legend_frame, text="有物品", bg='#4CAF50', fg='white', width=8,
+                 font=('微软雅黑',12,'bold')).pack(side=tk.LEFT, padx=5)
+        tk.Label(legend_frame, text="无物品", bg='#9E9E9E', fg='white', width=8,
+                 font=('微软雅黑',12,'bold')).pack(side=tk.LEFT, padx=5)
 
         # 从服务端获取柜子状态
         try:
             self.lockers_data = network_manager.get_lockers_status()
         except requests.exceptions.RequestException:
-            messagebox.showerror("网络错误", "无法连接至服务器，请检查网络连接")
-            self.parent.show_main_interface()
+            ui_dialog.show(self.root, "网络错误", "无法连接至服务器，请检查网络连接",
+                           [("确定", True)], kind="error",
+                           on_close=lambda _v: self.parent.show_main_interface())
             return
 
         self.locker_buttons = []
@@ -89,8 +95,8 @@ class TakeUI:
             bg = '#4CAF50' if status == 1 else '#9E9E9E'
             state = tk.NORMAL if status == 1 else tk.DISABLED
             text = f"{i}号柜"
-            btn = tk.Button(scrollable, text=text, bg=bg, fg='white', font=('微软雅黑',10,'bold'),
-                            width=10, height=3, state=state,
+            btn = tk.Button(scrollable, text=text, bg=bg, fg='white', font=('微软雅黑',16,'bold'),
+                            width=10, height=4, state=state,
                             command=lambda lid=i: self._select_locker(lid))
             btn.grid(row=row, column=col, padx=10, pady=10)
             self.locker_buttons.append(btn)
@@ -145,8 +151,8 @@ class TakeUI:
                 tk.Label(container, text="图片加载失败", bg='#f0f0f0', font=('微软雅黑',12)).pack(pady=10)
 
         # 取物按钮
-        take_btn = tk.Button(container, text="确认取物", bg='#4CAF50', fg='white', font=('微软雅黑',12,'bold'),
-                             width=15, height=2, command=lambda: self._confirm_take(locker_id, item))
+        take_btn = tk.Button(container, text="确认取物", bg='#4CAF50', fg='white', font=('微软雅黑',20,'bold'),
+                             width=12, height=2, command=lambda: self._confirm_take(locker_id, item))
         take_btn.pack(pady=20)
 
     def _download_photo(self, photo_name):
@@ -159,26 +165,40 @@ class TakeUI:
                 f.write(resp.content)
             return temp_path
         except requests.exceptions.RequestException:
-            messagebox.showerror("网络错误", "无法连接至服务器，请检查网络连接")
+            self._alert("网络错误", "无法连接至服务器，请检查网络连接")
             return None
         except Exception as e:
             print(f"下载照片失败: {e}")
             return None
 
     def _confirm_take(self, locker_id, item):
-        confirm = messagebox.askyesno("确认取物", f"确认从 {locker_id} 号柜取物吗？\n\n位置: {config.LOCATION}\n取物人: {self.taker_name}")
-        if not confirm:
-            return
+        ui_dialog.confirm(
+            self.root, "确认取物",
+            "确认从 %s 号柜取物吗？\n\n位置：%s\n取物人：%s"
+            % (locker_id, config.LOCATION, self.taker_name),
+            on_yes=lambda: self._do_take(locker_id),
+            on_no=lambda: None,
+        )
 
+    def _do_take(self, locker_id):
         try:
             network_manager.take_item(locker_id, self.taker_name)
             open_lock.open_lock(lock_number=locker_id)
-            messagebox.showinfo("取物成功", f"正在打开 {locker_id} 号柜...\n\n取物成功！\n柜子：{locker_id}号柜\n取物人：{self.taker_name}")
-            self.parent.show_main_interface()
+            ui_dialog.show(
+                self.root, "取物成功",
+                "%s 号柜已打开\n\n取物人：%s\n请取走物品并关好柜门。"
+                % (locker_id, self.taker_name),
+                [("知道了", True)], kind="ok",
+                on_close=lambda _v: self.parent.show_main_interface(),
+            )
         except requests.exceptions.RequestException:
-            messagebox.showerror("网络错误", "无法连接至服务器，请检查网络连接")
+            self._alert("网络错误", "无法连接至服务器，请检查网络连接")
         except Exception as e:
-            messagebox.showerror("错误", f"取物失败：{e}")
+            self._alert("取物失败", "取物失败：%s" % e)
+
+    def _alert(self, title, message, kind="error"):
+        ui_dialog.show(self.root, title, message, [("确定", True)], kind=kind,
+                       on_close=lambda _v: self.parent.show_main_interface())
 
     def _clear_window(self):
         """清空主窗口"""

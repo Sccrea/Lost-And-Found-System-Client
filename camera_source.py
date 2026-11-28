@@ -44,7 +44,7 @@ def list_cameras():
 class PiCamera2Source:
     """Picamera2 封装，read() 返回 BGR 帧。"""
 
-    def __init__(self, index, width, height):
+    def __init__(self, index, width, height, exposure_compensation=0.0):
         from picamera2 import Picamera2
         from libcamera import controls
 
@@ -58,14 +58,30 @@ class PiCamera2Source:
         self._picam.configure(cfg)
         self._picam.start()
         # Camera Module 3 支持自动对焦，打开连续对焦否则画面永远是糊的
+        controls_wanted = {
+            "AfMode": controls.AfModeEnum.Continuous,
+            "AfSpeed": controls.AfSpeedEnum.Fast,
+            "AfRange": controls.AfRangeEnum.Normal,
+            # 限制在 30fps：曝光时间不超过 33ms，真人轻微移动也不会糊成一团
+            "FrameDurationLimits": (33333, 33333),
+            # 优先短曝光（宁可提高增益），减少运动模糊
+            "AeExposureMode": controls.AeExposureModeEnum.Short,
+            # 中央加权测光：人脸在画面中间时不会因为背光而欠曝
+            "AeMeteringMode": controls.AeMeteringModeEnum.CentreWeighted,
+        }
+        if exposure_compensation:
+            controls_wanted["ExposureValue"] = float(exposure_compensation)
         try:
-            self._picam.set_controls({
-                "AfMode": controls.AfModeEnum.Continuous,
-                "AfSpeed": controls.AfSpeedEnum.Fast,
-            })
+            self._picam.set_controls(controls_wanted)
         except Exception:
-            pass
-        time.sleep(0.6)  # 等曝光/白平衡稳定
+            # 某些机型不支持个别控制项，逐个兜底
+            for key in ("AeMeteringMode", "AeExposureMode", "FrameDurationLimits", "ExposureValue"):
+                controls_wanted.pop(key, None)
+            try:
+                self._picam.set_controls(controls_wanted)
+            except Exception:
+                pass
+        time.sleep(0.8)  # 等曝光/白平衡/对焦稳定
 
     def read(self):
         try:
@@ -147,12 +163,13 @@ class OpenCvSource:
         return self.cap is not None and self.cap.isOpened()
 
 
-def open_camera(index=0, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, backend="auto"):
+def open_camera(index=0, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, backend="auto",
+                exposure_compensation=0.0):
     """打开摄像头；失败返回 None。"""
     index = int(index)
     if backend in ("auto", "picamera2") and _picamera2_available():
         try:
-            return PiCamera2Source(index, width, height)
+            return PiCamera2Source(index, width, height, exposure_compensation)
         except Exception as e:
             print("[camera] Picamera2 打开相机 %s 失败: %s" % (index, e))
             if backend == "picamera2":

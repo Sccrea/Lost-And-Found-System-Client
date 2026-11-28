@@ -81,7 +81,7 @@ class CameraPreview:
 
         self.canvas.delete("all")
         if bgr is not None:
-            photo = bgr_to_photo(bgr, w, h)
+            photo = bgr_to_photo(bgr, w, max(120, h - 36))   # 底部留出提示文字的位置
             if photo is not None:
                 self._photo = photo
                 self.canvas.create_image(w // 2, h // 2, image=photo, anchor="center")

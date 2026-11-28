@@ -1,6 +1,7 @@
 import os
 import sys
 import threading
+import time
 import traceback
 from datetime import datetime
 
@@ -11,6 +12,7 @@ from take_ui import TakeUI
 import config
 import heartbeat
 import item_recognizer
+import ui_dialog
 import network_manager
 import requests
 
@@ -20,6 +22,10 @@ class LostAndFoundApp:
         self.root.title("失物招领管理系统")
         self.root.geometry("700x600")
         self.root.configure(bg='#f0f0f0')
+
+        # 当前界面（main / store / take），供"非主界面 30 秒无操作自动回主页"使用
+        self.current_view = "main"
+        self.last_activity = time.time()
 
         # 获取屏幕尺寸用于自适应
         self.screen_width = self.root.winfo_screenwidth()
@@ -36,6 +42,10 @@ class LostAndFoundApp:
         # 初始化UI子模块
         self.store_ui = StoreUI(self)
         self.take_ui = TakeUI(self)
+
+        # 任何触摸都算"有操作"
+        self.root.bind_all('<Button-1>', self._touch, add='+')
+        self.root.after(1000, self._idle_watch)
 
         # 显示主界面
         self.show_main_interface()
@@ -57,6 +67,8 @@ class LostAndFoundApp:
             print(f"终端信息上传失败: {e}，可能网络不可用，使用本地缓存")
 
     def show_main_interface(self):
+        self.current_view = "main"
+        self.last_activity = time.time()
         self._clear_window()
         main_frame = tk.Frame(self.root, bg='#f0f0f0')
         main_frame.pack(expand=True, fill='both')
@@ -114,10 +126,40 @@ class LostAndFoundApp:
         self._quit_app()
 
     def _quit_app(self, event=None):
-        """退出应用程序"""
-        if messagebox.askyesno("确认退出", "确定要退出失物招领系统吗？"):
-            self.root.quit()
-            self.root.destroy()
+        """退出应用程序（内嵌确认框）"""
+        ui_dialog.confirm(
+            self.root, "确认退出", "确定要退出失物招领系统吗？",
+            on_yes=self._do_quit,
+            on_no=self.show_main_interface,
+        )
+
+    def _do_quit(self):
+        self.root.quit()
+        self.root.destroy()
+
+    # ------------------------------------------------------------ 空闲自动回主页
+    def _touch(self, _event=None):
+        self.last_activity = time.time()
+
+    def _idle_watch(self):
+        try:
+            idle_limit = float(getattr(config, "PREVIEW_IDLE_TIMEOUT_SEC", 30))
+            if self.current_view != "main" and time.time() - self.last_activity > idle_limit:
+                self.go_home()
+        except Exception:
+            pass
+        self.root.after(1000, self._idle_watch)
+
+    def go_home(self):
+        """从任意界面立即回到主界面（会先取消正在进行的预览）。"""
+        handler = getattr(self.root, "escape_handler", None)
+        if handler is not None:
+            self.root.escape_handler = None
+            try:
+                handler()
+            except Exception:
+                pass
+        self.show_main_interface()
 
 def _write_crash_log(exc_text):
     """打包成 windowed exe 后没有控制台，把异常落到 files/error.log 便于排查。"""
