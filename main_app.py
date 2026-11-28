@@ -13,6 +13,7 @@ import config
 import heartbeat
 import item_recognizer
 import ui_dialog
+import screen_saver
 import network_manager
 import requests
 
@@ -46,6 +47,14 @@ class LostAndFoundApp:
         # 任何触摸都算"有操作"
         self.root.bind_all('<Button-1>', self._touch, add='+')
         self.root.after(1000, self._idle_watch)
+
+        # 空闲 30 秒熄屏（触摸自动亮屏）
+        self.screen_saver = screen_saver.ScreenSaver(
+            self.root,
+            idle_seconds=getattr(config, "SCREEN_OFF_SEC", 30),
+            on_before_sleep=self._prepare_sleep,
+            enabled=getattr(config, "SCREEN_OFF_ENABLE", True),
+        )
 
         # 显示主界面
         self.show_main_interface()
@@ -134,12 +143,21 @@ class LostAndFoundApp:
         )
 
     def _do_quit(self):
+        try:
+            self.screen_saver.shutdown()
+        except Exception:
+            pass
         self.root.quit()
         self.root.destroy()
 
     # ------------------------------------------------------------ 空闲自动回主页
     def _touch(self, _event=None):
         self.last_activity = time.time()
+
+    def _prepare_sleep(self):
+        """熄屏前：如果还停在非主界面，先回到主界面。"""
+        if self.current_view != "main":
+            self.go_home()
 
     def _idle_watch(self):
         try:

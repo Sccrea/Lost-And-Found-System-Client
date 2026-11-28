@@ -36,7 +36,9 @@ DEFAULT_CONFIG = {
     "FACE_TIMEOUT_SEC": 30,           # 摄像头 30 秒未识别到人脸就返回主界面
     "PREVIEW_IDLE_TIMEOUT_SEC": 30,   # 预览界面 30 秒无触摸操作就返回主界面
     "HEARTBEAT_SEC": 10,            # 心跳间隔（秒），服务端据此判断在线
-    "FACE_DEBUG_SAVE": True          # 取物时把上传的人脸画面存到 files/debug/ 便于排查
+    "FACE_DEBUG_SAVE": True,         # 取物时把上传的人脸画面存到 files/debug/ 便于排查
+    "SCREEN_OFF_SEC": 30,           # 空闲多少秒后熄屏（保护屏幕），0=不熄屏
+    "SCREEN_OFF_ENABLE": True       # 是否启用自动熄屏
 }
 
 def ensure_config():
@@ -84,3 +86,5 @@ FACE_TIMEOUT_SEC = float(_config.get("FACE_TIMEOUT_SEC", 30))
 PREVIEW_IDLE_TIMEOUT_SEC = float(_config.get("PREVIEW_IDLE_TIMEOUT_SEC", 30))
 HEARTBEAT_SEC = float(_config.get("HEARTBEAT_SEC", 10))
 FACE_DEBUG_SAVE = bool(_config.get("FACE_DEBUG_SAVE", True))
+SCREEN_OFF_SEC = float(_config.get("SCREEN_OFF_SEC", 30))
+SCREEN_OFF_ENABLE = bool(_config.get("SCREEN_OFF_ENABLE", True))
